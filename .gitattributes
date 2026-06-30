@@ -1,0 +1,8 @@
+# Claude Code's Workflow tool loads these orchestration scripts via `scriptPath`
+# and rejects carriage-return (CR) control characters in the script body. On a
+# Windows checkout, the default `core.autocrlf=true` rewrites the LF-clean git
+# blobs to CRLF in the working tree, which makes the Workflow tool refuse to
+# load them. Pin them to LF so a fresh clone stays loadable regardless of the
+# user's autocrlf setting (the blobs are already LF, so this only constrains the
+# working tree).
+*.workflow.js text eol=lf

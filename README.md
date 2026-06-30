@@ -2,6 +2,8 @@
 
 > *Associative memory for AI agents.*
 
+[![CI](https://github.com/mihaipreotu-droid/priming-stream/actions/workflows/ci.yml/badge.svg)](https://github.com/mihaipreotu-droid/priming-stream/actions/workflows/ci.yml)
+
 A persistent, **owner-controlled associative memory** for an AI agent working in
 [Claude Code](https://docs.claude.com/claude-code). It gives the assistant a durable, cross-session
 *priming* layer: as you work, past conversations and documents are distilled into compact memory
