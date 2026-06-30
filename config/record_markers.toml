@@ -1,0 +1,28 @@
+# Record-extraction heuristic markers (v0.7-x W-C).
+#
+# Seed list — calibrate in Phase 5 against false-negative / false-positive
+# rates on the 20-conv sample. Markers are matched as case-insensitive
+# substrings against chunk text by ``priming_stream.ingest.record_filter.score``.
+# Score formula: ``min(1.0, hit_count * 0.3)``. Default pass threshold = 0.3
+# (one hit ≡ pass).
+#
+# Layout: ``[<lang>] <intent> = [<marker>, ...]``. Languages and intents are
+# free-form keys; ``load_markers`` returns the nested dict unchanged so the
+# caller can iterate either dimension. Intents we seed: decision, outcome,
+# insight, pivot, link, contrast.
+
+[ro]
+decision = ["decid", "DECIS", "alegem", "merg cu", "hai cu", "rămân cu"]
+outcome  = ["a mers", "a funcționat", "crăpat", "rezolvat", "n-a mers"]
+insight  = ["interesant că", "îmi dau seama", "aha", "asta înseamnă"]
+pivot    = ["renunț", "schimb", "în loc de", "abandonez", "pivot"]
+link     = ["echivalent", "depinde de", "implică", "ține de"]
+contrast = ["vs", "tradeoff", "diferența", "spre deosebire"]
+
+[en]
+decision = ["decide", "let's use", "going with", "let's go with", "DECIS"]
+outcome  = ["worked", "broke", "fixed", "rolled back", "didn't work"]
+insight  = ["realize", "I see", "aha", "this means", "interesting that"]
+pivot    = ["drop", "switch", "instead of", "abandon", "pivot"]
+link     = ["equivalent", "depends on", "implies", "boils down to"]
+contrast = ["vs", "tradeoff", "difference", "unlike"]

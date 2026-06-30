@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "priming-stream"
+version = "0.1.0"
+description = "Associative memory for AI agents — automatic associative priming for Claude Code"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.0",
+    "markitdown[docx,pdf,xlsx,pptx]",
+    "psutil>=5.9",
+    "chromadb>=1.0",
+    "fastembed>=0.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+prime = "priming_stream.cli.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

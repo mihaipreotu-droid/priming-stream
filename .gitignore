@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime state — never committed. The canonical SQLite DB (storage/graph.db) holds
+# personal substrate data and is kept OFF the remote (2026-06-15 decision): backups
+# are LOCAL only (prime db-snapshot → storage/_db_snapshots/). Do NOT re-add a
+# !storage/graph.db negation.
+storage/*
+
+# Panel run artifacts
+runs/
+
+# Claude harness state (worktrees, transcripts, etc.) — never committed.
+# Use .claude/* (not .claude/) so the project-level skills directory below
+# can be re-included via negation. Git refuses to re-include files inside
+# a fully-ignored parent directory.
+.claude/*
+# …except for project-level Claude Code skills, which are part of the repo.
+!.claude/skills/
+
+# OS
+Thumbs.db
+desktop.ini
+
+# User-owned claude.ai exports (personal data — never commit)
+export chats/
+export chats */
+export*chats*/
+
+# Smoke / stress harness outputs (contain labels extracted from real
+# conversations, regenerable by re-running the harness)
+smoke_compare_results.json
+
+# Phase-5 calibration scratch (regenerable)
+tools/calibration/_scratch/

@@ -1,0 +1,45 @@
+{
+  "_comment": "Example .claude/settings.json 'hooks' block for the Priming Stream bridge. Copy the 'hooks' object into your project's .claude/settings.json. The hooks run via 'python -m priming_stream.hooks.<name>', which requires the Priming Stream package to be installed first ('pip install -e .' from the repo root). Each hook reads a JSON event from stdin and writes a JSON result to stdout. The hooks only read the active graph and write to the episodic log; they never write graph.db.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m priming_stream.hooks.session_start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m priming_stream.hooks.user_prompt_submit"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m priming_stream.hooks.stop"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m priming_stream.hooks.session_end"
+          }
+        ]
+      }
+    ]
+  }
+}

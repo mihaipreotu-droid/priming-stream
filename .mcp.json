@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "priming-stream": {
+      "command": "python",
+      "args": [
+        "-m",
+        "priming_stream.mcp_server.server"
+      ]
+    }
+  }
+}

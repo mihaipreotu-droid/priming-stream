@@ -1,0 +1,49 @@
+[paths]
+storage_dir = "storage"
+# Watch folder for claude.ai data-export archives. Relative paths resolve
+# under storage_dir.
+exports_dir = "exports"
+
+[sleep]
+idle_minutes = 30
+chunk_max_turns = 120
+mutex_timeout_s = 300
+# Per-chunk char budget. Tuned for RAM safety in the user's normal
+# Windows environment when materializing chunks; the adapter's
+# ``split_bursts`` enforces this.
+chunk_max_chars = 30_000
+
+[bridge]
+# v0.7-x W-D: adaptive spreading activation defaults (spec §3 / brief §D).
+# Multi-hop vec_index search with multiplicative decay; calibrate in Phase 5.
+decay = 0.8
+min_score = 0.3
+frontier_cap = 10
+k_per_query = 10
+max_hops = 4
+max_records = 20            # legacy spread() (MCP/CLI); equals semantic budget below.
+# Component A (read-time bridge restructuring). Frozen defaults; Phase 5 calibrates.
+recency_strength = 0.25      # A.5b recency weight, [0,1]. ON by default (gentle).
+recency_age_span_days = 180  # A.5b age normalization span (days).
+recency_p_max = 0.5          # A.5b penalty ceiling.
+bucket_total = 25            # shared priming budget (semantic + lexical).
+bucket_lexical = 5           # bucket B cap; semantic budget = bucket_total - bucket_lexical.
+recency_filter_cutoff = ""   # A.5c hard cutoff date; "" = off (stretch).
+
+[llm]
+# Empty = SDK/Claude Code default. Set "sonnet" or "opus" to pin a model.
+model = ""
+# Env var name the SDK reads for OAuth (no value here — set externally).
+# Generate via `claude setup-token` (long-lived Pro/Max token).
+auth_token_env = "CLAUDE_CODE_OAUTH_TOKEN"
+
+[mcp]
+read_only = true
+
+[vec_index]
+# v0.7-x-vec-index: fastembed + ChromaDB in-process transport.
+# ``persist_dir`` resolves under storage_dir when relative (same
+# convention as ``paths.exports_dir``). ``model_name`` is the
+# fastembed.TextEmbedding model id.
+persist_dir = "vec_index/chroma"
+model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"

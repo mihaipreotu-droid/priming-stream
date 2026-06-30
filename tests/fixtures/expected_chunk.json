@@ -1,0 +1,33 @@
+{
+  "chunk_id": "claude_code_sess-synthetic-001_000",
+  "source_client": "claude_code",
+  "session_id": "sess-synthetic-001",
+  "started_at": "2026-05-20T10:00:00Z",
+  "ended_at": "2026-05-20T10:06:00Z",
+  "turns": [
+    {
+      "index": 0,
+      "role": "user",
+      "text": "I'm trying to understand spreading activation. If I light up one node in an associative graph, how does the activation reach related nodes?",
+      "timestamp": "2026-05-20T10:00:00Z"
+    },
+    {
+      "index": 1,
+      "role": "assistant",
+      "text": "Spreading activation starts from a set of source nodes and propagates outward along weighted edges. Each hop multiplies the incoming activation by the edge weight and a decay factor, so distant nodes receive progressively less. You usually cap the number of hops and clamp activation to keep it bounded.",
+      "timestamp": "2026-05-20T10:01:00Z"
+    },
+    {
+      "index": 2,
+      "role": "user",
+      "text": "Does that mean I should store the graph in a graph database, or is SQLite enough for this?",
+      "timestamp": "2026-05-20T10:04:00Z"
+    },
+    {
+      "index": 3,
+      "role": "assistant",
+      "text": "For a single-user graph of modest size, SQLite is plenty. A dedicated graph database helps when traversals are deep and the dataset is large, but spreading activation over a few hops is just a handful of indexed joins. SQLite also keeps the whole substrate portable and inspectable in one file.",
+      "timestamp": "2026-05-20T10:06:00Z"
+    }
+  ]
+}

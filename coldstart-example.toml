@@ -1,0 +1,17 @@
+# Coldstart manifest — example.
+#
+# Seeds the substrate from a set of claude.ai conversation exports (the same
+# format `prime ingest-source --kind export` consumes). Point `paths` at one
+# or more folders containing your exported conversations.
+#
+# Usage:
+#   python -m priming_stream.cli.main init
+#   python -m priming_stream.cli.main coldstart --config coldstart-example.toml
+#   # then, in an active Claude Code session, extract records:
+#   /prime-ingest --all-pending
+#
+# Coldstart only materializes chunks into the episodic log — record extraction
+# is the /prime-ingest sleep cycle's job (it needs the Claude Code Workflow runtime).
+
+[exports]
+paths = ["./export-chats"]
