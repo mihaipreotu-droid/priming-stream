@@ -25,6 +25,7 @@ Usage:  python writer.py
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from priming_stream.core.config import load_config
@@ -448,9 +449,20 @@ def _run(repo, corpus, results_dir, assign_dir, json,
     for lp, title in unresolved_docs:
         print(f"  doc UNRESOLVED (named but not found on disk -> not carded): "
               f"'{lp}'" + (f" [{title[:40]}]" if title else ""))
-    if over_pool or bad_chunk or bad_block or bad_doc:
-        print(f"  skipped: over_pool={over_pool} bad_chunk_id={bad_chunk} "
+    if bad_chunk or bad_block or bad_doc:
+        print(f"  skipped: bad_chunk_id={bad_chunk} "
               f"bad_block={bad_block} bad_doc={bad_doc}")
+    # over_pool = records dropped because the rec_id pool ran out. With the
+    # load-proportional pool it should never fire; if it does, it's a signal
+    # (runaway worker, or too tight a divisor) and real data loss once the cycle
+    # finalizes — loud on stderr, but non-fatal (never block a legitimate finalize).
+    if over_pool:
+        print(
+            f"  WARNING: {over_pool} record(s) DROPPED — rec_id pool exhausted; "
+            f"lost once the cycle finalizes; check for a runaway worker or lower "
+            f"DENSE_TOKENS_PER_RECORD",
+            file=sys.stderr,
+        )
     for conv, n in sorted(per_conv.items(), key=lambda kv: -kv[1]):
         if n:
             print(f"  {conv[:13]:13s} {n}")

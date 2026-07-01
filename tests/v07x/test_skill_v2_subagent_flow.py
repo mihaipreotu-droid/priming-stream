@@ -55,32 +55,26 @@ writer = _load_module("ch_sleep_writer", "writer.py")
 def test_extraction_unified_on_sonnet():
     """Unified on Sonnet (2026-07-01): the size-based Opus routing was dropped —
     every conversation extracts on the bare ``sonnet`` alias (latest tier,
-    native 1M). The old model-routing constants are gone."""
-    assert not hasattr(plan, "TOKEN_THRESHOLD")
-    assert not hasattr(plan, "OPUS_POOL")
+    native 1M). The old model-routing + static-pool constants are gone."""
+    for gone in ("TOKEN_THRESHOLD", "OPUS_POOL", "SONNET_POOL",
+                 "LARGE_POOL", "SMALL_POOL", "LARGE_CONV_TOKENS"):
+        assert not hasattr(plan, gone), f"{gone} should be removed"
 
 
-def test_pool_threshold_and_sizes():
-    """``est_tokens`` no longer routes the model — it only sizes the rec_id
-    pool. LARGE_CONV_TOKENS is the boundary above which a worker gets LARGE_POOL
-    pre-generated ids instead of SMALL_POOL."""
-    assert plan.LARGE_CONV_TOKENS == 100_000
-    assert plan.SMALL_POOL == 50
-    assert plan.LARGE_POOL == 150
+def test_pool_size_is_load_proportional_with_floor():
+    """The rec_id pool is sized to est_tokens at the densest-case record rate
+    (a headroom ceiling, not a mean), with a floor for tiny conversations."""
+    assert plan._pool_size(5_000) == plan.POOL_FLOOR   # floor dominates for tiny convs
+    assert plan._pool_size(20_000) == 30
+    assert plan._pool_size(100_000) == 150
+    assert plan._pool_size(233_000) == 350
+    assert plan._pool_size(882_000) == 1323
 
 
-def test_small_conversation_gets_small_pool():
-    est_tokens = 50_000
-    pool = plan.LARGE_POOL if est_tokens > plan.LARGE_CONV_TOKENS else plan.SMALL_POOL
-    assert pool == plan.SMALL_POOL
-
-
-def test_large_conversation_gets_large_pool():
-    """A >100K conversation (formerly routed to Opus) still extracts on Sonnet,
-    but gets the bigger rec_id pool so it can't run out of ids."""
-    est_tokens = 150_000
-    pool = plan.LARGE_POOL if est_tokens > plan.LARGE_CONV_TOKENS else plan.SMALL_POOL
-    assert pool == plan.LARGE_POOL
+def test_pool_size_monotonic_nondecreasing():
+    """A bigger conversation never gets fewer ids than a smaller one."""
+    sizes = [plan._pool_size(t) for t in (10_000, 50_000, 200_000, 500_000)]
+    assert sizes == sorted(sizes)
 
 
 @pytest.mark.parametrize(

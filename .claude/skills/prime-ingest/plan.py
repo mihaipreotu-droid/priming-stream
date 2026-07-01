@@ -16,7 +16,7 @@ Final design (converged 2026-05-31; unified on Sonnet 2026-07-01):
     regardless of corpus size (refinement B).
   - Pre-generated unique rec_id pools (workers don't shell for ids).
 
-Usage:  python plan.py <manifest.json> [--threshold 100000]
+Usage:  python plan.py <manifest.json>
 Writes: storage/corpus/_sleep_assign/<conv>.json  (per-conversation slices)
         storage/corpus/_sleep_index.json           (cycle_id + conv list + mode)
 Prints: cycle_id + per-conversation line (mode, chunks, ~tokens).
@@ -24,6 +24,7 @@ Prints: cycle_id + per-conversation line (mode, chunks, ~tokens).
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import sys
@@ -37,12 +38,19 @@ _PN = re.compile(r"_p(\d+)$")
 _UUID_SEG = re.compile(r"[/\\]([0-9a-fA-F-]{36}|u\d+)[/\\][^/\\]+$")
 
 CHARS_PER_TOK = 3.8          # mixed RO/EN rough
-# rec_id pool sizing (NOT model routing — extraction is unified on Sonnet).
-# A large conversation yields more records, so a worker whose est_tokens exceeds
-# LARGE_CONV_TOKENS gets the bigger pre-generated id pool.
-LARGE_CONV_TOKENS = 100_000
-SMALL_POOL = 50
-LARGE_POOL = 150
+# rec_id pool sizing (NOT model routing — extraction is unified on Sonnet). The
+# pool is the list of pre-generated ids writer.py hands out one per record; a
+# conversation that yields more records than the pool holds drops the surplus
+# (lost at finalize). So size the pool to the LOAD, not a fixed cap: proportional
+# to est_tokens at the DENSEST plausible record rate (a pool is a headroom
+# ceiling, not a mean estimate), with a floor for tiny conversations.
+DENSE_TOKENS_PER_RECORD = 800   # densest-case tokens/record
+POOL_MARGIN = 1.2               # headroom over the dense-case estimate
+POOL_FLOOR = 25                 # minimum pool for small conversations
+
+
+def _pool_size(est_tokens: int) -> int:
+    return max(POOL_FLOOR, math.ceil(est_tokens / DENSE_TOKENS_PER_RECORD * POOL_MARGIN))
 
 
 def _conv_of(path: str) -> str:
@@ -71,9 +79,6 @@ def _body_len(path: str) -> int:
 def main() -> None:
     args = sys.argv[1:]
     manifest_path = args[0]
-    threshold = LARGE_CONV_TOKENS
-    if "--threshold" in args:
-        threshold = int(args[args.index("--threshold") + 1])
 
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8-sig"))
     cycle_id = manifest["cycle_id"]
@@ -124,7 +129,7 @@ def main() -> None:
                 {"chunk_id": c["chunk_id"], "path": c["path"], "source_uri": c["source_uri"]}
                 for c in chunks
             ],
-            "rec_ids": gen_ids(LARGE_POOL if est_tokens > threshold else SMALL_POOL),
+            "rec_ids": gen_ids(_pool_size(est_tokens)),
         }
         assign_path = str(assign_dir / f"{conv}.json")
         Path(assign_path).write_text(json.dumps(slice_obj, ensure_ascii=False), encoding="utf-8")
@@ -137,7 +142,7 @@ def main() -> None:
 
     print(f"cycle_id={cycle_id}")
     print(f"index={index_path}")
-    print(f"conversations={len(index)} chunks={len(prepared)} pool-threshold={threshold} tok (all Sonnet)")
+    print(f"conversations={len(index)} chunks={len(prepared)} (all Sonnet)")
     for e in index:
         print(f"  {e['conv'][:13]:13s} {e['mode']:6s} chunks={e['n_chunks']:2d} ~tok={e['est_tokens']}")
 

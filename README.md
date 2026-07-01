@@ -10,6 +10,17 @@ underlies not just remembering but *thinking* itself; creative thought most of a
 connections that are unexpected and distant, yet meaningful. **Priming Stream** sets out to give an AI agent
 working in [Claude Code](https://docs.claude.com/claude-code) something of that capacity.
 
+Two properties make it practical to run for real:
+
+- **Cheap enough for every turn.** The priming layer adds only a few hundred milliseconds per turn —
+  roughly 70–400 ms in local benchmarks, depending on how much the walk surfaces — because it runs over a
+  *local* embedding index against a warm daemon, with no network round-trip. Cheap enough to fire
+  unconditionally rather than on demand.
+- **Faithful pointers, not lossy summaries.** The workers that distill each past conversation into records
+  follow one binding rule (the *dyad-anchor test*): keep only what a fresh AI couldn't already retrieve —
+  your own reasoning, decisions, framings, and private facts, never public or textbook knowledge — as a
+  compact record anchored back to its source, a *prior to verify* rather than a summary to trust.
+
 It runs as a set of Claude Code **hooks** that prime every turn automatically — surfacing **semantic** and
 **lexical** associations, seeded from *both* your message and the assistant's own previous reply. What
 surfaces are compact **records** distilled from past conversations, sessions, and documents, embedded in a

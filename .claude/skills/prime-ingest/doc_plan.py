@@ -19,7 +19,7 @@ Per original:
   - write one per-doc assignment file + a doc-index the Workflow reads.
 
 Usage:  python doc_plan.py --originals <dir> [--conversions <dir>]
-                           [--threshold 100000] [--ext .pdf,.docx,...]
+                           [--ext .pdf,.docx,...]
 Writes: storage/corpus/_doc_assign/<cardstem>.json
         storage/corpus/_doc_index.json
 """
@@ -46,7 +46,6 @@ CHARS_PER_TOK = 3.8
 # doc rides Sonnet's own context window. The old >100K -> Opus routing is
 # dropped (Sonnet: quality winner + cheaper; Opus never got a 1M subagent
 # window anyway — CC bug #45169). ``est_tokens`` is kept for reporting only.
-TOKEN_THRESHOLD = 100_000  # retained as the --threshold default; no longer routes
 # Original document types we ingest. A native .md/.txt is its own worker
 # input (no conversion step). Everything else needs a .md translation.
 ORIGINAL_EXTS = {
@@ -117,7 +116,6 @@ def main() -> None:
              "with --originals, deduped, filtered to the doc-type allowlist",
     )
     ap.add_argument("--conversions", default=None, help="dir of existing .md conversions (parallel layout)")
-    ap.add_argument("--threshold", type=int, default=TOKEN_THRESHOLD)
     ap.add_argument("--ext", default=None, help="comma-separated override of original extensions")
     ap.add_argument(
         "--no-generate", action="store_true",
