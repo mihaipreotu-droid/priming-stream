@@ -120,7 +120,7 @@ def test_make_card_record_is_well_formed_index_card():
         source="file:///C:/Vault/wiki/surse/collins-loftus-1975.md",
         content_hash="abc123def456",
         created_at="2026-06-01T00:00:00Z",
-        body="## Summary\nSpreading-activation theory.\n\n## Relevance\nSMM core.",
+        body="## Summary\nSpreading-activation theory.\n\n## Relevance\nMeshgraph core.",
     )
     assert rec.kind == "index_card"
     assert rec.doc_key == "collins-loftus-1975"

@@ -148,7 +148,7 @@ def _seed_mixed(tmp_path) -> object:
     repo.create_record(Record(
         id="rec_claim1", source_uri="qmd://x/a.md",
         anchor_offset_start=0, anchor_offset_end=10,
-        summary="SemNet. a claim about networks", created_at=now_iso(),
+        summary="Meshgraph. a claim about networks", created_at=now_iso(),
         source_date="2026-03-01T10:00:00Z",
     ))
     repo.create_record(Record(

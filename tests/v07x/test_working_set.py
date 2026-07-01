@@ -162,9 +162,9 @@ def test_ac_citation_collins_loftus_card_surfaces_in_lexical(tmp_path):
     ]})
 
     # The real source case: a natural-language question naming the paper. Its
-    # tokens (ce/zice/collins/loftus/si/cum/am/folosit/asta/la/smm) are NOT a
+    # tokens (ce/zice/collins/loftus/si/cum/am/folosit/asta/la/meshgraph) are NOT a
     # subset of the card summary, so implicit-AND would MATCH zero rows.
-    prompt = "ce zice collins & loftus si cum am folosit asta la smm?"
+    prompt = "ce zice collins & loftus si cum am folosit asta la meshgraph?"
     result = build_priming(
         prompt, "",
         vec_index=vec, repo=repo, conn=conn, cfg=_cfg(), now=_NOW,
@@ -190,36 +190,36 @@ def test_ac_citation_collins_loftus_card_surfaces_in_lexical(tmp_path):
     assert and_rows == []  # implicit-AND: every prompt token required → zero
 
 
-# -- AC-bimodal (demografie + SemNet) ---------------------------------------
+# -- AC-bimodal (demografie + Meshgraph) ---------------------------------------
 
 
-def test_ac_bimodal_smm_in_semantic_demografie_in_lexical(tmp_path):
-    """A natural disjoint-theme sentence surfaces BOTH themes — SemNet via the
+def test_ac_bimodal_topic_in_semantic_demografie_in_lexical(tmp_path):
+    """A natural disjoint-theme sentence surfaces BOTH themes — Meshgraph via the
     semantic spread, demografie via the lexical citation channel; demografie
     must NOT leak into semantic. The prompt is a real question whose tokens
     are NOT a subset of any one summary, so under the OLD implicit-AND join
     bucket B returns zero (proven inline); OR surfaces the demografie record."""
     conn = _conn(tmp_path)
     repo = GraphRepo(conn)
-    _insert(repo, "rec_smm00001", "SemNet semantic network modelling cognitive structure")
-    _insert(repo, "rec_smm00002", "SemNet models consumer semantic networks")
-    _insert(repo, "rec_smm00003", "semantic network modelling doctoral thesis")
+    _insert(repo, "rec_msh00001", "Meshgraph knowledge-graph modelling cognitive structure")
+    _insert(repo, "rec_msh00002", "Meshgraph models entity relationship graphs")
+    _insert(repo, "rec_msh00003", "knowledge-graph modelling research notes")
     _insert(repo, "rec_demo0001",
             "demografie segmentare populatie pe varste si venituri")
 
-    # Stub: the prompt surfaces only the SemNet claims semantically (bucket A) —
+    # Stub: the prompt surfaces only the Meshgraph claims semantically (bucket A) —
     # the stub is independent of lexical token overlap.
     vec = _vec({"prompt": [
-        _hit("rec_smm00001", 0.9),
-        _hit("rec_smm00002", 0.88),
-        _hit("rec_smm00003", 0.85),
+        _hit("rec_msh00001", 0.9),
+        _hit("rec_msh00002", 0.88),
+        _hit("rec_msh00003", 0.85),
     ]})
 
     # One natural sentence spanning both themes. Its tokens overlap the
     # demografie summary only PARTIALLY (demografie/pe), so OR surfaces that
-    # record in bucket B; the stub routes the SAME prompt to the SemNet claims
+    # record in bucket B; the stub routes the SAME prompt to the Meshgraph claims
     # semantically. Bimodal: one prompt → two disjoint themes.
-    prompt = "cum se leaga metodologia SemNet de segmentarea pe demografie?"
+    prompt = "cum se leaga metodologia Meshgraph de segmentarea pe demografie?"
     result = build_priming(
         prompt, "",
         vec_index=vec, repo=repo, conn=conn, cfg=_cfg(), now=_NOW,
@@ -227,7 +227,7 @@ def test_ac_bimodal_smm_in_semantic_demografie_in_lexical(tmp_path):
 
     semantic_ids = {sr.record.id for sr in result.semantic}
     lexical_ids = {sr.record.id for sr in result.lexical}
-    assert {"rec_smm00001", "rec_smm00002", "rec_smm00003"} <= semantic_ids
+    assert {"rec_msh00001", "rec_msh00002", "rec_msh00003"} <= semantic_ids
     assert "rec_demo0001" in lexical_ids
     assert "rec_demo0001" not in semantic_ids
 

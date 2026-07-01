@@ -375,7 +375,7 @@ def test_h_partial_match_sentence_surfaces_record(tmp_path):
         )
         _add_record(conn, "totally unrelated content about pottery glazing")
 
-        prompt = "ce zice collins & loftus si cum am folosit asta la smm?"
+        prompt = "ce zice collins & loftus si cum am folosit asta la meshgraph?"
         out = lexical_bucket(conn, prompt, limit=5, exclude_ids=set())
 
         # OR: the bare 'collins'/'loftus' overlap surfaces the card.

@@ -36,7 +36,7 @@ def repo(tmp_path):
     apply_migrations(conn)
     r = GraphRepo(conn)
     recs = [
-        ("rec_a", "Dirichlet prior on edge weights for SemNet calibration"),
+        ("rec_a", "Dirichlet prior on edge weights for Meshgraph calibration"),
         ("rec_b", "Collins and Loftus 1975 spreading activation theory"),
         ("rec_c", "PanelX pilot 76 respondenti 305 noduri"),
     ]

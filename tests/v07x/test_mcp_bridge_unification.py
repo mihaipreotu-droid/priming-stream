@@ -172,7 +172,7 @@ def test_graph_salient_context_two_bucket_format(tmp_path):
     db = tmp_path / "graph.db"
     conn = _conn(tmp_path)
     repo = GraphRepo(conn)
-    _insert(repo, "rec_sem00001", "SemNet semantic network modelling architecture",
+    _insert(repo, "rec_sem00001", "Meshgraph knowledge-graph modelling architecture",
             source_date="2026-05-01T10:00:00Z")
     _insert(repo, "rec_sem00002", "bridge daemon warm latency budget",
             source_date="2026-04-15T08:00:00Z")
@@ -186,7 +186,7 @@ def test_graph_salient_context_two_bucket_format(tmp_path):
 
     result = _dispatch_with_stub(
         "graph_salient_context",
-        {"message": "ce arhitectura are bridge-ul SemNet?"},
+        {"message": "ce arhitectura are bridge-ul Meshgraph?"},
         db,
         vec,
         cfg,
@@ -339,7 +339,7 @@ def test_graph_spread_items_have_source_date_and_kind(tmp_path):
     db = tmp_path / "graph.db"
     conn = _conn(tmp_path)
     repo = GraphRepo(conn)
-    _insert(repo, "rec_spr00001", "SemNet semantic network modelling",
+    _insert(repo, "rec_spr00001", "Meshgraph knowledge-graph modelling",
             kind="claim", source_date="2026-05-10T00:00:00Z")
     _insert(repo, "rec_spr00002", "PanelX n=76 panel measurement",
             kind="index_card", source_date="2026-05-20T00:00:00Z")
@@ -352,7 +352,7 @@ def test_graph_spread_items_have_source_date_and_kind(tmp_path):
     cfg = _cfg()
 
     result = _dispatch_with_stub(
-        "graph_spread", {"text": "SemNet measurement panel"}, db, vec, cfg
+        "graph_spread", {"text": "Meshgraph measurement panel"}, db, vec, cfg
     )
 
     assert isinstance(result, list)

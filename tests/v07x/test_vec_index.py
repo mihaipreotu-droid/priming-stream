@@ -215,7 +215,7 @@ def test_real_fastembed_round_trip(tmp_path: Path):
     idx.add_records_batch([
         ("r_arch", "Priming Stream architecture System 1 substrate"),
         ("r_fert", "sex differences fertility civilizational decline"),
-        ("r_smm", "SemNet positioning Software 3.0 Karpathy semantic mix"),
+        ("r_msh", "Meshgraph positioning Software 3.0 Karpathy knowledge graph"),
     ])
     assert idx.count() == 3
 
