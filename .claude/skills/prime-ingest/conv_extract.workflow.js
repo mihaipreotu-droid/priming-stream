@@ -104,10 +104,10 @@ const idx = await agent(
 phase('Extract')
 const results = await parallel(idx.conversations.map((c) => () =>
   agent(workerPrompt(c.conv), {
-    label: `${c.mode === 'opus' ? 'opus' : 'extract'}:${c.conv.slice(0, 8)}`,
+    label: `extract:${c.conv.slice(0, 8)}`,
     phase: 'Extract',
     schema: RESULT_SCHEMA,
-    model: c.mode, // 'sonnet' | 'opus'
+    model: c.mode, // always 'sonnet' (unified) — bare alias, latest tier
   })
 ))
 
@@ -115,11 +115,9 @@ const clean = results.filter(Boolean)
 const total = clean.reduce((a, r) => a + (r.records_written || 0), 0)
 const totalDocs = clean.reduce((a, r) => a + (r.docs_written || 0), 0)
 const notable = clean.filter(r => r.notable).length
-const opusConvs = idx.conversations.filter(c => c.mode === 'opus').length
-log(`conversational extract done: ${clean.length} conversations (${opusConvs} via Opus), ${notable} notable, ${total} records + ${totalDocs} doc-stubs in results`)
+log(`conversational extract done: ${clean.length} conversations, ${notable} notable, ${total} records + ${totalDocs} doc-stubs in results`)
 return {
   conversations: clean.length,
-  opus_conversations: opusConvs,
   notable,
   total_records: total,
   total_doc_stubs: totalDocs,

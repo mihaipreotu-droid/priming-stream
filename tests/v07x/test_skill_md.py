@@ -123,20 +123,21 @@ def test_skill_md_has_ordered_steps_1_through_7():
             f"missing step header matching {header!r}"
 
 
-# -- Step 2 — plan.py routing by body-token load ------------------------
+# -- Step 3 — plan.py: unified on Sonnet (Opus routing dropped) ----------
 
 
-def test_step2_routes_conversations_to_opus():
-    """L(b) decision (2026-06-10): every conversation routes to Opus; the
-    skill must state the default AND the --threshold rollback knob."""
+def test_step3_extraction_unified_on_sonnet():
+    """Unified on Sonnet (2026-07-01): the conversational branch dropped the
+    size-based Opus routing. The skill must document extraction unified on the
+    bare ``sonnet`` alias and must NOT reintroduce the all-Opus ``--threshold``
+    rollback knob."""
     body = _body()
-    # token-load routing vocabulary survives (the knob still routes by load)
-    assert "body-token" in body or "body token" in body
     lower = body.lower()
-    assert "opus" in lower
-    assert "--threshold" in body, "the rollback knob must be documented"
-    # the planner groups by conversation
+    assert "unified on sonnet" in lower, \
+        "the conversational branch must document unified-Sonnet extraction"
     assert "conversation" in lower
+    assert "all-opus" not in lower, \
+        "the dropped all-Opus rollback knob must not reappear"
 
 
 # -- Step 3 — one worker per conversation, single full-context pass -------

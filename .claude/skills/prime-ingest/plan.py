@@ -1,15 +1,16 @@
 """Sleep-cycle planner — turns a sleep-prepare manifest into per-conversation
 extraction assignments for the conversational workflow.
 
-Final design (converged 2026-05-31; routing revised 2026-06-10):
+Final design (converged 2026-05-31; unified on Sonnet 2026-07-01):
   - ONE worker per conversation (no segmentation, no framework-pass, no merge).
-  - Route by CONTEXT LOAD, not chunk count: estimate body tokens per
-    conversation; > TOKEN_THRESHOLD -> Opus single-pass. Default threshold
-    is 0 — EVERY conversation goes to Opus (L(b) probe beta, 2026-06-10:
-    with the same contract + chunking, Sonnet under-executes the
-    analytical-moves class — corrections, decisions-with-rationale — that
-    the substrate exists to keep; pass --threshold 100000 to restore the
-    old size-based Sonnet routing).
+  - Unified on Sonnet: every conversation extracts on the bare ``sonnet``
+    alias, which the Workflow resolves to the latest Sonnet tier (Sonnet 5+,
+    native 1M context). The old size-based Opus routing is dropped — Sonnet was
+    already the quality winner (better contract compliance + more grounded,
+    findable records), it is cheaper, and Sonnet 5's native 1M window removes
+    the only reason large conversations went to Opus (which never actually got
+    a 1M subagent window anyway — CC bug #45169 stripped the ``[1m]`` suffix).
+    ``est_tokens`` is kept only to size each worker's rec_id pool.
   - Per-conversation assignment FILES (one small file per conv) so each worker
     reads only its own slice — non-chunk context overhead stays ~constant
     regardless of corpus size (refinement B).
@@ -36,17 +37,12 @@ _PN = re.compile(r"_p(\d+)$")
 _UUID_SEG = re.compile(r"[/\\]([0-9a-fA-F-]{36}|u\d+)[/\\][^/\\]+$")
 
 CHARS_PER_TOK = 3.8          # mixed RO/EN rough
-# 100_000 -> conversations >100K body-tokens route to Opus, the rest to Sonnet.
-# Reverted from 0 (all-Opus, L(b) 2026-06-10) on 2026-06-11: Opus showed weaker
-# contract compliance (e.g. EN records on RO chunks, violating the language rule)
-# + higher cost, while the manual quality verify found Sonnet records more
-# grounded/findable; the analytical-moves edge didn't justify the swap.
-# --threshold 0 forces all-Opus again. NOTE: routing to 'opus' does NOT grant a
-# 1M window — the workflow alias 'opus' resolves to ~200K (CC bug #45169 strips
-# the [1m] suffix on subagents); large convs rely on the worker's running-synthesis.
-TOKEN_THRESHOLD = 100_000
-SONNET_POOL = 50
-OPUS_POOL = 150
+# rec_id pool sizing (NOT model routing — extraction is unified on Sonnet).
+# A large conversation yields more records, so a worker whose est_tokens exceeds
+# LARGE_CONV_TOKENS gets the bigger pre-generated id pool.
+LARGE_CONV_TOKENS = 100_000
+SMALL_POOL = 50
+LARGE_POOL = 150
 
 
 def _conv_of(path: str) -> str:
@@ -75,7 +71,7 @@ def _body_len(path: str) -> int:
 def main() -> None:
     args = sys.argv[1:]
     manifest_path = args[0]
-    threshold = TOKEN_THRESHOLD
+    threshold = LARGE_CONV_TOKENS
     if "--threshold" in args:
         threshold = int(args[args.index("--threshold") + 1])
 
@@ -116,7 +112,7 @@ def main() -> None:
         chunks.sort(key=lambda c: _order_key(c["chunk_id"]))
         body_chars = sum(_body_len(c["path"]) for c in chunks)
         est_tokens = int(body_chars / CHARS_PER_TOK)
-        mode = "opus" if est_tokens > threshold else "sonnet"
+        mode = "sonnet"  # unified: bare alias auto-tracks the latest Sonnet (5+)
         slice_obj = {
             "conv": conv,
             "mode": mode,
@@ -128,7 +124,7 @@ def main() -> None:
                 {"chunk_id": c["chunk_id"], "path": c["path"], "source_uri": c["source_uri"]}
                 for c in chunks
             ],
-            "rec_ids": gen_ids(OPUS_POOL if mode == "opus" else SONNET_POOL),
+            "rec_ids": gen_ids(LARGE_POOL if est_tokens > threshold else SMALL_POOL),
         }
         assign_path = str(assign_dir / f"{conv}.json")
         Path(assign_path).write_text(json.dumps(slice_obj, ensure_ascii=False), encoding="utf-8")
@@ -141,7 +137,7 @@ def main() -> None:
 
     print(f"cycle_id={cycle_id}")
     print(f"index={index_path}")
-    print(f"conversations={len(index)} chunks={len(prepared)} threshold={threshold} tok")
+    print(f"conversations={len(index)} chunks={len(prepared)} pool-threshold={threshold} tok (all Sonnet)")
     for e in index:
         print(f"  {e['conv'][:13]:13s} {e['mode']:6s} chunks={e['n_chunks']:2d} ~tok={e['est_tokens']}")
 

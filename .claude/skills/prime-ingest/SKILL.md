@@ -112,17 +112,17 @@ skip to Step 6 (finalize with zero counts).
 ```powershell
 python .claude\skills\prime-ingest\plan.py storage\corpus\_sleep_manifest.json
 ```
-Groups chunks by conversation, estimates body-token load, routes by size —
-**conversations >100K tokens → Opus, the rest → Sonnet** single-pass (reverted
-2026-06-11 from all-Opus; `--threshold 0` forces all-Opus again), pre-generates a
-`rec_id` pool, writes per-conversation assignment files + `storage\corpus\_sleep_index.json`.
-Prints `cycle_id`, `conversations`, `chunks` (= **K**). **Record K.**
+Groups chunks by conversation, estimates body-token load (to size the `rec_id`
+pool), pre-generates that pool, writes per-conversation assignment files +
+`storage\corpus\_sleep_index.json`. Extraction is **unified on Sonnet** — one
+worker per conversation on the bare `sonnet` alias (latest tier, native 1M),
+Opus dropped. Prints `cycle_id`, `conversations`, `chunks` (= **K**). **Record K.**
 
 ### 3b. Run the conversational-extraction Workflow
 ```
 Workflow({ scriptPath: ".claude/skills/prime-ingest/conv_extract.workflow.js" })
 ```
-**One worker per conversation** (Sonnet default, Opus for large — see Step 3a routing). Each reads only its
+**One worker per conversation** (all Sonnet — bare alias, latest tier). Each reads only its
 assignment slice + the binding contract + its chunks; writes one results JSON. No
 segmentation/framework/dedup pass — the single full-context pass does it. Wait for
 completion; per-conversation counts are indicative (workers under-report — disk is
@@ -156,8 +156,8 @@ storage\corpus\_produced_docs.json` whenever the conversation branch ran (Step 3
 that file is non-empty. doc_plan **merges + dedupes** both sources and filters to the
 document-type allowlist (a stray code path is dropped, never reaching markitdown).
 Computes `content_hash` per original + prefilters (carded-and-unchanged → skip, no
-LLM), resolves the worker-input `.md` (existing or markitdown), routes Sonnet/Opus,
-writes per-doc assignments + `storage\corpus\_doc_index.json`. Prints `to_card=<N>`.
+LLM), resolves the worker-input `.md` (existing or markitdown), assigns all to Sonnet
+(unified), writes per-doc assignments + `storage\corpus\_doc_index.json`. Prints `to_card=<N>`.
 **If `to_card=0`, skip to Step 5.**
 ### 4b. Run the doc-card Workflow
 ```

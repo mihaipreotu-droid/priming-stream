@@ -4,8 +4,9 @@ The skill-v2 manual sub-agent flow (size-class parallel caps, a failure-mode
 taxonomy with retry loops, and a JSON reject-validator mirroring "Step 2.3")
 was replaced by a deterministic pipeline:
 
-  * ``plan.py`` groups chunks by conversation and ROUTES BY BODY-TOKEN LOAD
-    (≤100K → Sonnet single-pass, >100K → Opus-1M single-pass). No size
+  * ``plan.py`` groups chunks by conversation; extraction is UNIFIED ON SONNET
+    (the bare ``sonnet`` alias → latest tier, native 1M). ``est_tokens`` no
+    longer routes the model — it only sizes each worker's rec_id pool. No size
     classes, no parallel caps — the Workflow fans out one worker per
     conversation.
   * Each worker writes ONE delimited PLAIN-TEXT results file (not JSON, so
@@ -47,38 +48,39 @@ writer = _load_module("ch_sleep_writer", "writer.py")
 
 
 # ---------------------------------------------------------------------------
-# plan.py — routing by body-token load (replaces size-class caps)
+# plan.py — unified on Sonnet; body-token load sizes the rec_id pool
 # ---------------------------------------------------------------------------
 
 
-def test_token_threshold_default_is_size_based():
-    """Reverted 2026-06-11 from all-Opus (L(b) threshold 0): default threshold
-    is 100K — conversations >100K body-tokens route to Opus, the rest to Sonnet
-    (Opus showed weaker contract compliance + higher cost; the analytical-moves
-    edge didn't justify the swap). --threshold 0 forces all-Opus again."""
-    assert plan.TOKEN_THRESHOLD == 100_000
+def test_extraction_unified_on_sonnet():
+    """Unified on Sonnet (2026-07-01): the size-based Opus routing was dropped —
+    every conversation extracts on the bare ``sonnet`` alias (latest tier,
+    native 1M). The old model-routing constants are gone."""
+    assert not hasattr(plan, "TOKEN_THRESHOLD")
+    assert not hasattr(plan, "OPUS_POOL")
 
 
-def test_route_small_conversation_to_sonnet_at_default():
-    """A conversation <=100K tokens routes to Sonnet at the default threshold."""
+def test_pool_threshold_and_sizes():
+    """``est_tokens`` no longer routes the model — it only sizes the rec_id
+    pool. LARGE_CONV_TOKENS is the boundary above which a worker gets LARGE_POOL
+    pre-generated ids instead of SMALL_POOL."""
+    assert plan.LARGE_CONV_TOKENS == 100_000
+    assert plan.SMALL_POOL == 50
+    assert plan.LARGE_POOL == 150
+
+
+def test_small_conversation_gets_small_pool():
     est_tokens = 50_000
-    mode = "opus" if est_tokens > plan.TOKEN_THRESHOLD else "sonnet"
-    assert mode == "sonnet"
+    pool = plan.LARGE_POOL if est_tokens > plan.LARGE_CONV_TOKENS else plan.SMALL_POOL
+    assert pool == plan.SMALL_POOL
 
 
-def test_route_large_conversation_to_opus_at_default():
-    """A conversation >100K tokens routes to Opus at the default threshold."""
+def test_large_conversation_gets_large_pool():
+    """A >100K conversation (formerly routed to Opus) still extracts on Sonnet,
+    but gets the bigger rec_id pool so it can't run out of ids."""
     est_tokens = 150_000
-    mode = "opus" if est_tokens > plan.TOKEN_THRESHOLD else "sonnet"
-    assert mode == "opus"
-
-
-def test_route_formula_respects_explicit_threshold():
-    """--threshold 100000 restores the old routing: <=100K stays Sonnet,
-    >100K goes Opus (boundary inclusive for Sonnet)."""
-    threshold = 100_000
-    assert ("opus" if threshold > threshold else "sonnet") == "sonnet"
-    assert ("opus" if threshold + 1 > threshold else "sonnet") == "opus"
+    pool = plan.LARGE_POOL if est_tokens > plan.LARGE_CONV_TOKENS else plan.SMALL_POOL
+    assert pool == plan.LARGE_POOL
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 export const meta = {
   name: 'prime-ingest-doc-cards',
-  description: 'Document ingestion: ONE index-card worker per document, routed by .md size (Sonnet <=100K tokens; Opus-1M above). Each worker reads the document conversion + the contract and writes ONE plain-markdown card BODY; a Python bulk-writer wraps it in authoritative frontmatter afterward.',
+  description: 'Document ingestion: ONE index-card worker per document, unified on Sonnet (bare alias, latest tier). Each worker reads the document conversion + the contract and writes ONE plain-markdown card BODY; a Python bulk-writer wraps it in authoritative frontmatter afterward.',
   phases: [
     { title: 'Load', detail: 'read the doc-index doc_plan wrote' },
     { title: 'Card', detail: 'one worker per document; each writes a single content-only card body' },
@@ -85,20 +85,18 @@ const idx = await agent(
 phase('Card')
 const results = await parallel(idx.docs.map((d) => () =>
   agent(workerPrompt(d.source, d.assign_path), {
-    label: `${d.mode === 'opus' ? 'opus' : 'card'}:${(d.source || '').slice(-28)}`,
+    label: `card:${(d.source || '').slice(-28)}`,
     phase: 'Card',
     schema: RESULT_SCHEMA,
-    model: d.mode, // 'sonnet' | 'opus'
+    model: d.mode, // always 'sonnet' (unified) — bare alias, latest tier
   })
 ))
 
 const clean = results.filter(Boolean)
 const written = clean.filter(r => r.written).length
-const opusDocs = idx.docs.filter(d => d.mode === 'opus').length
-log(`doc ingest done: ${clean.length} docs (${opusDocs} via Opus), ${written} card files written`)
+log(`doc ingest done: ${clean.length} docs, ${written} card files written`)
 return {
   docs: clean.length,
-  opus_docs: opusDocs,
   written,
   per_doc: clean.map(r => ({ source: r.source, title: r.title, written: r.written, words: r.words })),
 }

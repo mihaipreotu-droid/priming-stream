@@ -15,7 +15,7 @@ Per original:
   - doc_key = derive_doc_key(original); content_hash = sha256(original bytes).
   - prefilter against existing cards (skip carded + unchanged → no LLM call).
   - resolve the worker-input .md (native .md → itself; else conversion or
-    markitdown); route Sonnet/Opus by the .md's body-token load.
+    markitdown); assign Sonnet (unified) and record the .md's body-token load.
   - write one per-doc assignment file + a doc-index the Workflow reads.
 
 Usage:  python doc_plan.py --originals <dir> [--conversions <dir>]
@@ -40,7 +40,13 @@ from priming_stream.core.source_uri import build as build_uri
 from priming_stream.ingest.doc_ingest import content_hash
 
 CHARS_PER_TOK = 3.8
-TOKEN_THRESHOLD = 100_000  # .md body tokens; > this -> Opus, else Sonnet
+# Unified on Sonnet (2026-07-01): every document cards on the bare ``sonnet``
+# alias (latest Sonnet tier, native 1M). A document is atomic — its card
+# summarizes the whole file — so it can't be load-split across agents; a large
+# doc rides Sonnet's own context window. The old >100K -> Opus routing is
+# dropped (Sonnet: quality winner + cheaper; Opus never got a 1M subagent
+# window anyway — CC bug #45169). ``est_tokens`` is kept for reporting only.
+TOKEN_THRESHOLD = 100_000  # retained as the --threshold default; no longer routes
 # Original document types we ingest. A native .md/.txt is its own worker
 # input (no conversion step). Everything else needs a .md translation.
 ORIGINAL_EXTS = {
@@ -89,7 +95,7 @@ def _text_len(md_path: Path) -> int:
     # Byte length is a fine proxy for the token estimate (routing only) and
     # is robust to non-utf-8 conversions (some markitdown output isn't clean
     # utf-8). The worker reads the file via the Read tool, which handles
-    # encoding itself — doc_plan only needs a size for Sonnet/Opus routing.
+    # encoding itself — doc_plan only needs a rough size for reporting.
     try:
         return len(md_path.read_bytes())
     except OSError:
@@ -239,7 +245,7 @@ def main() -> None:
                 n_gen += 1
 
         est_tokens = int(_text_len(md_path) / CHARS_PER_TOK)
-        mode = "opus" if est_tokens > args.threshold else "sonnet"
+        mode = "sonnet"  # unified: bare alias auto-tracks the latest Sonnet (5+)
         src_uri = _file_uri(original)
         # Deterministic stem for the assign/results pair (doc_key is unknown
         # until card_writer derives it from the worker's components).
@@ -275,8 +281,7 @@ def main() -> None:
           f"skipped_unchanged={n_skip}")
     print(f"  conversion: existing={n_convfound} generated={n_gen} "
           f"native_md={n_native} no_conversion_skipped={n_noconv}")
-    op = sum(1 for e in index if e["mode"] == "opus")
-    print(f"  routing: sonnet={len(index)-op} opus={op}")
+    print(f"  routing: sonnet={len(index)} (unified — Opus dropped)")
     for e in index[:60]:
         # doc_key is unknown at plan time (card_writer derives it from the
         # worker's metadata, post-rewire); show the source path instead.
