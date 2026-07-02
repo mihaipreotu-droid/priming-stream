@@ -531,6 +531,21 @@ turn — many of them at once. Each must earn its slot.
   - **Don't generalise the entities away.** Named entities and mechanisms are
     what make a record findable and distinct; an abstract paraphrase that drops
     them floats.
+  - **Transferable learnings anchor on the PRINCIPLE, not the origin client.**
+    When the record is a generalizable lesson (the KEEP-class "transferable
+    learning") learned inside client/project work, lead with the named
+    principle/mechanism (*"MMM data-floor."*), and keep the origin entities
+    in the BODY as provenance (*"— seen at Acme"*). A future
+    query for the lesson comes from a DIFFERENT context, so the record must
+    sit in the neighbourhood of its USE (the problem class), not its ORIGIN;
+    the origin stays reachable through the named entities (lexical match) and
+    the project's own dense records. A record strictly about the client's own
+    state/decision keeps the client anchor as before.
+  - **Spell out key mechanisms at first mention, acronym in parentheses** —
+    *"marketing mix modeling (MMM)"*, never bare *"MMM"* — whenever both forms
+    circulate. Future queries use either form; the spelled form carries the
+    embedding, the acronym carries the literal (FTS) match. The parenthetical
+    acronym does not count against the 20-word cap.
   - **Match generality to the claim's actual scope.** A local decision stays
     grounded in its subject; abstraction is the *live layer's* job, not the
     record's (theme-formation is out of scope by design). A genuine cross-domain
