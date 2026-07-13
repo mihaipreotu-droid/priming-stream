@@ -78,6 +78,7 @@ def build_priming(
     conn,
     cfg,
     now: datetime | None = None,
+    exclude_recent_ids: frozenset[str] | set[str] = frozenset(),
 ) -> PrimingResult:
     """Run the A-pipeline and return the two priming buckets.
 
@@ -89,6 +90,11 @@ def build_priming(
       ``cfg.bucket_lexical``, ``index_card``-biased.
 
     ``now`` defaults to the current UTC instant (recency reads tz-aware UTC).
+
+    ``exclude_recent_ids`` (item 3.3): record ids primed in the last N turns of
+    the same session. Applied to BOTH buckets before their truncation so freed
+    slots backfill from the tail. Empty default → behaviour identical to before
+    (stateless MCP pull-bridges pass nothing).
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -97,6 +103,7 @@ def build_priming(
         walk_two_seeds(prompt, prev, vec_index, repo, cfg),
         cfg,
         now=now,
+        exclude_recent_ids=exclude_recent_ids,
     )
     exclude = {sr.record.id for sr in semantic}
     lexical = lexical_bucket(
@@ -105,5 +112,6 @@ def build_priming(
         limit=cfg.bucket_lexical,
         exclude_ids=exclude,
         kind_bias=True,
+        exclude_recent_ids=exclude_recent_ids,
     )
     return PrimingResult(semantic=semantic, lexical=lexical)

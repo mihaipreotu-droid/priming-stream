@@ -36,7 +36,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import chromadb
+# ``chromadb`` is imported lazily inside ``RecordsVecIndex.__init__`` (item 3.4):
+# it costs ~1.5s to import and pulls a large dependency tree. Deferring it to
+# construction keeps merely IMPORTING ``RecordsVecIndex`` (the class) cheap, so
+# the read-only MCP server — whose verify tool (graph_chunk_around_anchor) never
+# builds an index — starts its stdio handshake fast instead of paying chromadb
+# up front. The daemon still constructs an index at startup, so its warm-model
+# behaviour is unchanged.
 
 
 _COLLECTION_NAME = "records"
@@ -57,6 +63,8 @@ class VecHit:
 
 class RecordsVecIndex:
     def __init__(self, persist_dir: Path, model_name: str) -> None:
+        import chromadb  # lazy: see module-level note (item 3.4 MCP startup)
+
         persist_dir.mkdir(parents=True, exist_ok=True)
         self._persist_dir = persist_dir
         self._model_name = model_name

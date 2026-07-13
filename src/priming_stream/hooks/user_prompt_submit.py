@@ -129,6 +129,68 @@ def _log_echo(
         pass
 
 
+# Item 3.3 cross-turn dedup — bounded tail of echoes.jsonl to reconstruct the
+# per-session priming window. 256KB comfortably spans the last N turns of one
+# session even when many sessions interleave; measured ~1.5ms/call.
+_DEDUP_TAIL_BYTES = 262144
+
+
+def _recent_primed_ids(session_id) -> list:
+    """Union of record ids primed in the last N turns of ``session_id``.
+
+    Source for item 3.3: reads the tail of episodic ``echoes.jsonl``
+    (append-only, chronological), scans backward, and unions the ``semantic`` +
+    ``lexical`` ids of the most recent ``cfg.bridge.dedup_window_turns`` echoes
+    for THIS session. Those ids are handed to the daemon, which drops them
+    before truncating each bucket so freed slots backfill from the tail.
+
+    Returns ``[]`` (dedup off this turn) when: no session id,
+    ``PRIMING_STREAM_DEDUP_OFF`` set, window turns <= 0, the log is absent, or
+    any error — the turn never blocks or crashes on the window read. A partial
+    first line from the tail seek fails ``json.loads`` and is skipped harmlessly.
+    """
+    if not session_id or os.environ.get("PRIMING_STREAM_DEDUP_OFF"):
+        return []
+    try:
+        cfg = load_config()
+        n = int(getattr(cfg.bridge, "dedup_window_turns", 0) or 0)
+        if n <= 0:
+            return []
+        path = resolve_paths(cfg).episodic_dir / "echoes.jsonl"
+        if not path.exists():
+            return []
+        with path.open("rb") as fh:
+            fh.seek(0, 2)
+            end = fh.tell()
+            fh.seek(max(0, end - _DEDUP_TAIL_BYTES))
+            data = fh.read()
+        sid = str(session_id)
+        ids: set[str] = set()
+        seen = 0
+        for ln in reversed(data.decode("utf-8", "replace").splitlines()):
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                e = json.loads(ln)
+            except Exception:
+                continue
+            if str(e.get("session_id") or "") != sid:
+                continue
+            for r in (e.get("semantic") or []):
+                if r:
+                    ids.add(str(r))
+            for r in (e.get("lexical") or []):
+                if r:
+                    ids.add(str(r))
+            seen += 1
+            if seen >= n:
+                break
+        return list(ids)
+    except Exception:
+        return []
+
+
 def _force_utf8_stdio() -> None:
     """Best-effort: switch ``sys.stdout``/``sys.stderr`` to utf-8.
 
@@ -183,10 +245,15 @@ def main() -> None:
         prev = str(event.get("prev_assistant_text") or "")
         session_id = event.get("session_id") or None
 
+        # Item 3.3: ids primed in the last N turns of this session — suppressed
+        # this turn so the freed slots surface fresh (distal) records instead of
+        # re-injecting what the model already saw. Best-effort; [] disables.
+        recent_ids = _recent_primed_ids(session_id)
+
         # Tier 1: resident daemon.
         try:
             response = daemon_client.spread(
-                prompt, prev, session_id=session_id,
+                prompt, prev, session_id=session_id, recent_ids=recent_ids,
             )
         except Exception:
             response = None
@@ -211,6 +278,11 @@ def main() -> None:
             cfg = load_config()
             paths = resolve_paths(cfg)
             hits = fallback_lexical.search(paths.graph_db, prompt, k=10)
+            # Item 3.3: apply the same cross-turn dedup on the cold path —
+            # drop recently-primed ids (same-or-fewer, never padded).
+            if recent_ids and hits:
+                recent_set = set(recent_ids)
+                hits = [h for h in hits if h[0] not in recent_set]
         except Exception:
             hits = []
         if hits:

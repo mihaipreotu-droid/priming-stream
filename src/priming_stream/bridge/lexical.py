@@ -65,6 +65,7 @@ def lexical_bucket(
     limit: int,
     exclude_ids: set[str],
     kind_bias: bool = True,
+    exclude_recent_ids: frozenset[str] | set[str] = frozenset(),
 ) -> list[ScoredRecord]:
     """FTS5 BM25 lexical bucket over ``records.summary`` for the PROMPT ONLY.
 
@@ -75,6 +76,11 @@ def lexical_bucket(
 
     See the module docstring + the frozen interface contract for the full
     behaviour (sanitize, no threshold, A-first dedup, kind-bias).
+
+    ``exclude_recent_ids`` (item 3.3 cross-turn dedup): ids primed in the last
+    N turns of the same session. Folded into the drop set alongside the A-first
+    ``exclude_ids``; the over-fetch grows with it so backfill still fills
+    ``limit`` from the next BM25 hits. Empty default → no-op.
     """
     try:
         if limit <= 0:
@@ -83,11 +89,21 @@ def lexical_bucket(
         if not match:
             return []
 
-        # Query enough rows to survive dedup against bucket A: ``limit``
-        # survivors are needed, up to ``len(exclude_ids)`` rows may be
-        # dropped, and a further ``limit`` of headroom absorbs the case
-        # where the excluded ids are not the top BM25 hits. bm25 is raw
-        # (lower = better); read positionally so row_factory is irrelevant.
+        # A-first dedup ids + cross-turn recent ids share identical filter
+        # behaviour here (drop the row, keep scanning), so fold them into one
+        # drop set for the row check.
+        drop_ids = set(exclude_ids) | set(exclude_recent_ids)
+
+        # Size the over-fetch on the A-dedup set ONLY — deliberately NOT on
+        # ``exclude_recent_ids``. The recent set is large (~all ids primed in
+        # the last N turns) and mostly OFF-TOPIC for this prompt, so counting
+        # it here would balloon ``fetch_n`` and let ``kind_bias`` promote
+        # index_cards that only exist in the enlarged window ahead of genuine
+        # top hits — perturbing NON-recent records (item 3.3 turn-69 finding).
+        # The ``+ limit`` headroom still absorbs recent hits that DO land in
+        # the window (the common repeat case); if more than that are recent,
+        # the bucket yields fewer — correct (those were re-shown repeats),
+        # never padded. bm25 is raw (lower = better); read positionally.
         fetch_n = limit + len(exclude_ids) + limit
         rows = conn.execute(
             "SELECT r.id, bm25(records_fts) AS rank "
@@ -106,8 +122,8 @@ def lexical_bucket(
         scored: list[ScoredRecord] = []
         for row in rows:
             rec_id, bm25_val = row[0], row[1]
-            if rec_id in exclude_ids:
-                continue  # A-first dedup, not a relevance cut
+            if rec_id in drop_ids:
+                continue  # A-first dedup + 3.3 cross-turn dedup, not a relevance cut
             cur = conn.cursor()
             cur.row_factory = sqlite3.Row
             db_row = cur.execute(

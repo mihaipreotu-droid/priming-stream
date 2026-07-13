@@ -541,6 +541,25 @@ turn — many of them at once. Each must earn its slot.
     the origin stays reachable through the named entities (lexical match) and
     the project's own dense records. A record strictly about the client's own
     state/decision keeps the client anchor as before.
+    - **The origin MUST stay in the body — it is a lexical seed, not decoration
+      (binding).** This clause has TWO moves: (1) lead with the principle, (2)
+      *keep the origin entity verbatim in the body*. Move (2) is the one that
+      gets silently dropped, because after you abstract to the principle the
+      origin *feels* incidental ("just where the code ran") — drop it and the
+      record becomes unreachable by a query seeded on that project/asset, which
+      is exactly how the owner recalls it later. **Dropping the origin because
+      the lesson is "fully general" IS the failure mode: general lessons still
+      need their origin for seed-based recall.** The principle lead sets the
+      *semantic* neighbourhood; the in-body origin preserves the *lexical* seed
+      — you need BOTH.
+    - **Internal / tooling / hardware origins count too.** The trap fires hardest
+      on non-client origins — an internal tool (*Acme-CLI*), a device
+      (*a ThinkPad*), a script or tool name — which read as incidental but are
+      just as seedable as a client name. Keep them:
+      - ✗ *"Windows AI Fabric Service gates model loading; disabling it frees RAM."* (dropped *the device*)
+      - ✓ *"Windows AI Fabric Service gates model loading; disabling it frees RAM — seen on a ThinkPad."*
+      - ✗ *"PowerShell: piping stdout to Out-File can block a concurrent writer; use Out-Null."* (dropped *the tool*)
+      - ✓ *"…use Out-Null — seen in Acme-CLI."*
   - **Spell out key mechanisms at first mention, acronym in parentheses** —
     *"marketing mix modeling (MMM)"*, never bare *"MMM"* — whenever both forms
     circulate. Future queries use either form; the spelled form carries the

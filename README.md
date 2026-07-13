@@ -131,6 +131,11 @@ set a value to override it. The full inventory, by section:
 | `model_name` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | The `fastembed` embedding model — multilingual MiniLM, 384-dim (covers EN + RO). |
 | `persist_dir` | `"vec_index/chroma"` | ChromaDB persistent directory (relative → under `storage_dir`). |
 
+MiniLM is the default for speed. For better retrieval geometry at ~+1 GB RAM, `BAAI/bge-m3`
+is a drop-in upgrade — see [docs/embedding-options.md](docs/embedding-options.md) for the
+quality-vs-RAM trade-off and the switch procedure (custom-model registration + dimension
+rebuild).
+
 **`[llm]`** — the offline distillation step.
 
 | Knob | Default | What it does |
@@ -151,6 +156,42 @@ used as **analogy and design lineage** (the architecture sits on the MINERVA-2 /
 spreading-activation literature), not as a claim of biological equivalence or that the AI possesses a
 real System 1. `source_date` is when the *conversation* happened, not when a fact became true — treat
 surfaced records as a lossy *pointer* to their source, a prior to verify, not evidence.
+
+## Changelog
+
+The format follows [Keep a Changelog](https://keepachangelog.com); the project uses
+[Semantic Versioning](https://semver.org). All 0.x releases are proof-of-concept —
+minor versions may still move fast.
+
+### 0.2.0 — 2026-07-13
+
+**Added**
+
+- **Cross-turn priming dedup.** A record primed in the last *N* turns of a session
+  (default 10, `bridge.dedup_window_turns`) is no longer re-injected; the freed budget
+  backfills from the walk's tail, so more distal associations surface instead of repeats.
+  The per-turn total stays same-or-fewer, never padded. Disable with
+  `PRIMING_STREAM_DEDUP_OFF`.
+- **BGE-M3 embedder option.** `BAAI/bge-m3` (1024-dim) is now documented as a drop-in,
+  higher-quality alternative to the default MiniLM (384-dim) — better retrieval geometry
+  at ~+1 GB RAM. See [docs/embedding-options.md](docs/embedding-options.md) for the
+  quality-vs-RAM trade-off and the switch procedure.
+
+**Changed**
+
+- **Conditional verify footer.** The salient-context footer now asks the model to verify a
+  cited record via `graph_chunk_around_anchor` *only when that tool is connected*, and to
+  mark the specific as unverified otherwise — no fabricated verification when the read-only
+  MCP server is absent.
+- **Faster MCP startup.** `chromadb` is imported lazily, so the read-only MCP server (which
+  never builds an index) no longer pays the import cost on startup.
+- **Extraction contract.** Transferable-learning records now keep their origin entity
+  verbatim in the body as a lexical recall seed — including internal-tool, device, and
+  script origins, not just clients.
+
+### 0.1.0 — 2026-06-30
+
+- Initial public release.
 
 ## License
 

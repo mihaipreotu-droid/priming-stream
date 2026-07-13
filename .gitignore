@@ -17,7 +17,7 @@ storage/*
 # Panel run artifacts
 runs/
 
-# Claude harness state (worktrees, transcripts, etc.) — never committed.
+# Claude Code state (worktrees, transcripts, etc.) — never committed.
 # Use .claude/* (not .claude/) so the project-level skills directory below
 # can be re-included via negation. Git refuses to re-include files inside
 # a fully-ignored parent directory.
@@ -34,8 +34,7 @@ export chats/
 export chats */
 export*chats*/
 
-# Smoke / stress harness outputs (contain labels extracted from real
-# conversations, regenerable by re-running the harness)
+# Smoke / stress test outputs (regenerable by re-running the scripts)
 smoke_compare_results.json
 
 # Phase-5 calibration scratch (regenerable)

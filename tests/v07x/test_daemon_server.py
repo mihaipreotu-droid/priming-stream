@@ -272,6 +272,32 @@ def test_c2_spread_returns_two_buckets_with_required_shape(
     assert l0["kind"] == "index_card"
 
 
+def test_spread_passes_recent_ids_to_build_priming(live_server, monkeypatch):
+    """Item 3.3: the ``recent_ids`` list in the request body reaches
+    ``build_priming`` as ``exclude_recent_ids`` (a frozenset). A missing /
+    malformed field degrades to an empty set — never crashes the handler."""
+    captured = {}
+
+    def _capture(*a, **kw):
+        captured["exclude"] = kw.get("exclude_recent_ids")
+        return PrimingResult(semantic=[], lexical=[])
+
+    monkeypatch.setattr(server, "build_priming", _capture)
+
+    status, _ = _post(live_server, "/v1/spread", {
+        "prompt_text": "hello", "session_id": "s1",
+        "recent_ids": ["rec_aaa", "rec_bbb", "rec_aaa"],
+    })
+    assert status == 200
+    assert captured["exclude"] == frozenset({"rec_aaa", "rec_bbb"})
+
+    # Missing field → empty frozenset (no dedup), handler still 200.
+    captured.clear()
+    status, _ = _post(live_server, "/v1/spread", {"prompt_text": "hi"})
+    assert status == 200
+    assert captured["exclude"] == frozenset()
+
+
 def test_c2_spread_empty_results(live_server, monkeypatch):
     monkeypatch.setattr(
         server, "build_priming",

@@ -230,10 +230,19 @@ class _Handler(BaseHTTPRequestHandler):
             prompt = str(req.get("prompt_text") or "")
             prev = str(req.get("prev_assistant_text") or "")
             session_id = req.get("session_id") or None
+            # Item 3.3: ids primed in the last N turns of this session, dropped
+            # before each bucket's truncation so freed slots backfill. The hook
+            # computes the window (it owns the echo history); the daemon just
+            # applies the set. Defensive: tolerate a missing / non-list field.
+            raw_recent = req.get("recent_ids")
+            recent_ids = frozenset(
+                str(r) for r in raw_recent if r
+            ) if isinstance(raw_recent, list) else frozenset()
             t0 = time.monotonic()
             priming = build_priming(
                 prompt, prev,
                 vec_index=_vec_index, repo=_repo, conn=_conn, cfg=_bridge_cfg,
+                exclude_recent_ids=recent_ids,
             )
             elapsed_ms = (time.monotonic() - t0) * 1000.0
             sem_items, lex_items = priming_items(priming)

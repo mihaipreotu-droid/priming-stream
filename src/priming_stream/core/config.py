@@ -51,6 +51,14 @@ class BridgeConfig:
     bucket_total: int = 25              # shared priming budget (semantic + lexical).
     bucket_lexical: int = 5             # bucket B cap; semantic = bucket_total - bucket_lexical.
     recency_filter_cutoff: str = ""     # A.5c hard cutoff date; "" = off (stretch).
+    # Item 3.3 cross-turn dedup: a record primed in the last N turns of the same
+    # session is not re-emitted; the freed slot backfills from the tail (queue
+    # advances). Window is on TURNS (not permanent), so a still-relevant record
+    # re-emits after N turns. 0 = off. Env PRIMING_STREAM_DEDUP_OFF also disables.
+    # Applied in the hook (which reads the per-session echo history); the daemon
+    # just filters the ids it receives. Validated on replay: at N=10, in-window
+    # repeats 31%->0, 0 records lost, +distal surfaced.
+    dedup_window_turns: int = 10
 
 
 @dataclass

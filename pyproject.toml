@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "priming-stream"
-version = "0.1.0"
+version = "0.2.0"
 description = "Associative memory for AI agents — automatic associative priming for Claude Code"
 requires-python = ">=3.12"
 dependencies = [

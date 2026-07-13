@@ -133,7 +133,7 @@ def test_r2b_new_spread_after_reload_sees_new_index(live_server, monkeypatch):
     atomic swap should make build_priming see count=11 (the new stub).
     """
     def _fake_build_priming(prompt, prev, *, vec_index, repo, conn, cfg,
-                            now=None):
+                            now=None, exclude_recent_ids=frozenset()):
         return _priming_with_count(vec_index)
     monkeypatch.setattr(server, "build_priming", _fake_build_priming)
 

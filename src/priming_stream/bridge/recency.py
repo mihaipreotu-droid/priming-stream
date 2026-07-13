@@ -77,6 +77,7 @@ def select_semantic(
     cfg,
     *,
     now: datetime,
+    exclude_recent_ids: frozenset[str] | set[str] = frozenset(),
 ) -> list[ScoredRecord]:
     """Recency-weight (A.5b) + cutoff-filter (A.5c) bucket A, then rank.
 
@@ -85,11 +86,19 @@ def select_semantic(
     whose date is strictly before the cutoff (undated always pass). Sort by
     ``rank_score`` descending and truncate to ``bucket_total - bucket_lexical``.
     Returns new ScoredRecords carrying ``rank_score`` in ``.score``.
+
+    ``exclude_recent_ids`` (item 3.3 cross-turn dedup): record ids primed in
+    the last N turns of the same session. Dropped BEFORE truncation so the
+    freed budget backfills from the recency-ranked tail — the queue advances
+    and previously-crowded-out distal records surface. Empty default → no-op
+    (all existing callers / MCP pull-bridges unchanged).
     """
     cutoff = _parse_dt(cfg.recency_filter_cutoff)
 
     scored: list[ScoredRecord] = []
     for sr in activated:
+        if sr.record.id in exclude_recent_ids:
+            continue  # 3.3 cross-turn dedup — filter before truncation
         if cutoff is not None:
             rec_dt = _parse_dt(sr.record.source_date)
             if rec_dt is not None and rec_dt < cutoff:

@@ -81,6 +81,15 @@ def test_header_and_footer_invariants_present():
     assert "chunks verify" in out
 
 
+# (g2) item 3.4: the footer is CONDITIONED on tool availability — it names the
+#      verify tool AND the honest fallback when that tool is absent.
+def test_footer_conditions_on_tool_availability():
+    out = render_buckets([_sem("rec_a", "alpha", None, "claim")], [])
+    assert "graph_chunk_around_anchor" in out
+    assert "if it is not available" in out
+    assert "[neverificat]" in out
+
+
 # (h) unparseable source_date falls back to kind label without crashing
 def test_unparseable_source_date_falls_back_to_kind_label():
     out_card = render_buckets(

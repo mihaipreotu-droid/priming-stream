@@ -28,6 +28,7 @@ def spread(
     prev_assistant_text: str = "",
     *,
     session_id: str | None = None,
+    recent_ids: list | None = None,
     deadline_ms: int = 800,
     connect_timeout_ms: int = 100,
 ) -> dict | None:
@@ -37,6 +38,10 @@ def spread(
     endpoint, stale endpoint, slow daemon, connection refused, non-200
     status, malformed JSON, or any unexpected error. Triggers autostart
     when the endpoint file is missing or refers to a dead pid.
+
+    ``recent_ids`` (item 3.3): record ids primed in the last N turns of this
+    session; the daemon drops them before truncating each bucket so freed
+    slots backfill from the tail. ``None``/empty → no cross-turn dedup.
     """
     try:
         info = lifecycle.read_endpoint()
@@ -58,6 +63,7 @@ def spread(
             "prompt_text": prompt_text,
             "prev_assistant_text": prev_assistant_text,
             "session_id": session_id,
+            "recent_ids": list(recent_ids) if recent_ids else [],
         }, ensure_ascii=False).encode("utf-8")
 
         # Roll a single hard deadline across every socket operation, not

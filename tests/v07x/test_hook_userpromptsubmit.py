@@ -47,7 +47,7 @@ def test_d7_warm_daemon_returns_rendered_buckets(monkeypatch, capsys):
     """When the daemon returns the two buckets, the hook renders both
     sections via ``render_buckets`` + emits them (Component A shape)."""
 
-    def fake_spread(prompt, prev="", *, session_id=None,
+    def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
                     deadline_ms=800, connect_timeout_ms=100):
         return {
             "semantic": [
@@ -91,7 +91,7 @@ def test_d7_warm_daemon_returns_rendered_buckets(monkeypatch, capsys):
 def test_d7_warm_daemon_semantic_only_omits_lexical_section(monkeypatch, capsys):
     """A semantic-only response still renders (lexical section omitted)."""
 
-    def fake_spread(prompt, prev="", *, session_id=None,
+    def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
                     deadline_ms=800, connect_timeout_ms=100):
         return {
             "semantic": [
@@ -118,7 +118,7 @@ def test_d7_warm_daemon_lexical_only_still_renders(monkeypatch, capsys):
     """A lexical-only response (empty semantic) still emits priming —
     the citation channel can be the only relevant signal (Collins case)."""
 
-    def fake_spread(prompt, prev="", *, session_id=None,
+    def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
                     deadline_ms=800, connect_timeout_ms=100):
         return {
             "semantic": [],
