@@ -4,18 +4,24 @@
 
 [![CI](https://github.com/mihaipreotu-droid/priming-stream/actions/workflows/ci.yml/badge.svg)](https://github.com/mihaipreotu-droid/priming-stream/actions/workflows/ci.yml)
 
-Human memory is associative and spontaneous. As you perceive or reason, related memories — episodic and
-semantic — surface on their own: some tied closely to the matter at hand, some far from it. That mechanism
-underlies not just remembering but *thinking* itself; creative thought most of all is the making of
-connections that are unexpected and distant, yet meaningful. **Priming Stream** sets out to give an AI agent
-working in [Claude Code](https://docs.claude.com/claude-code) something of that capacity.
+Most memory systems for AI agents solve **known-unknowns**: you know what you don't know, so you (or
+the model) formulate a query and search for it — RAG, memory-search tools, retrieval on demand.
+Priming Stream solves **unknown-unknowns**: the things you don't know you don't know, where no query
+will ever be issued because nothing signals there is something to look for. Instead of waiting to be
+asked, it **pushes** — unconditionally, on every turn — whatever in the accumulated memory is
+associatively related to what is happening right now: sometimes close to the matter at hand, sometimes
+far from it, surfaced precisely because nobody thought to ask.
+
+The mechanism is borrowed from human memory, which is associative and spontaneous: as you perceive or
+reason, related memories — episodic and semantic — surface on their own. **Priming Stream** gives an AI
+agent working in [Claude Code](https://docs.claude.com/claude-code) something of that capacity.
 
 Two properties make it practical to run for real:
 
-- **Cheap enough for every turn.** The priming layer adds only a few hundred milliseconds per turn —
-  roughly 70–400 ms in local benchmarks, depending on how much the walk surfaces — because it runs over a
-  *local* embedding index against a warm daemon, with no network round-trip. Cheap enough to fire
-  unconditionally rather than on demand.
+- **Cheap enough for every turn.** Through a warm local daemon, short prompts prime in ~100–250 ms
+  wall and even a 3,200-char prompt returns in ~840 ms, under a hard 2-second client deadline with a
+  lexical (BM25) fallback beyond it — because it runs over a *local* embedding index, with no network
+  round-trip. Cheap enough to fire unconditionally rather than on demand.
 - **Faithful pointers, not lossy summaries.** The workers that distill each past conversation into records
   follow one binding rule (the *dyad-anchor test*): keep only what a fresh AI couldn't already retrieve —
   your own reasoning, decisions, framings, and private facts, never public or textbook knowledge — as a
@@ -123,18 +129,51 @@ set a value to override it. The full inventory, by section:
 | `recency_p_max` | `0.5` | Ceiling of the recency penalty. |
 | `recency_filter_cutoff` | `""` | Hard date cutoff — records older than this are excluded outright; `""` = off. |
 | `max_records` | `20` | Output cap for the deliberate `spread()` surface (MCP/CLI); equals the semantic budget. |
+| `dedup_window_turns` | `10` | Cross-turn dedup: records primed in the last *N* turns of a session are suppressed so freed slots surface fresh ones; `0` = off. |
+| `seed_char_budget` | `5000` | User-first input cap for the embedding seed: the user prompt is **never** truncated; the response-seed takes what remains. Sized so the embed stays under the 2 s client deadline; `0` = no cap. |
+| `turn_floor` | `0.40` | Turn-gate master switch: a turn whose top rank-score falls under the floor *whispers* (see below); `0` switches the **entire** gate off — the one-knob rollback. |
+| `regime_density` | `0.6` | Tool-density threshold above which a turn counts as execution regime and whispers. |
+| `whisper_k` | `5` | Semantic records kept on a whispered turn. |
+| `whisper_lex_k` | `3` | Lexical records kept on a whispered turn. |
+| `kickoff_turns` | `3` | The first *N* turns of a session always prime full, unconditionally. |
+
+Two run-time behaviours worth knowing around this table. **The turn-gate** (`turn_floor` > 0): one
+mechanism, two outputs — every turn primes either **full** or as a **whisper** (top `whisper_k` +
+`whisper_lex_k` records), never silence. A turn whispers on any of three triggers: weak associative
+field (top score under `turn_floor` — rendered with an explicit "weak associative field" marker so the
+model treats those records as weak suggestions), execution regime (`tool_density ≥ regime_density`),
+or a `<task-notification>` turn. It applies only to the automatic hook path — deliberate MCP/CLI pulls
+are never gated. **The response-seed**: the walk is seeded from *both* your message and the tail
+(~1,200 chars) of the assistant's previous reply, recovered from the session transcript; the seed
+budget is allocated user-first, and the hook's daemon round-trip runs under a fixed 2,000 ms deadline
+(`daemon/client.py`), falling back to lexical search past it. `prime echoes --stats` shows the
+per-day health of all of this: empty-rate, latency percentiles (uncensored, breaches included),
+whisper counts, and the response-seed's health.
 
 **`[vec_index]`** — the embedding transport (derived, rebuildable).
 
 | Knob | Default | What it does |
 |---|---|---|
-| `model_name` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | The `fastembed` embedding model — multilingual MiniLM, 384-dim (covers EN + RO). |
+| `model_name` | `onnx-community/bge-m3-ONNX-int8` | The `fastembed` embedding model — int8-quantized BGE-M3, 1024-dim, multilingual, custom-registered automatically. |
 | `persist_dir` | `"vec_index/chroma"` | ChromaDB persistent directory (relative → under `storage_dir`). |
 
-MiniLM is the default for speed. For better retrieval geometry at ~+1 GB RAM, `BAAI/bge-m3`
-is a drop-in upgrade — see [docs/embedding-options.md](docs/embedding-options.md) for the
-quality-vs-RAM trade-off and the switch procedure (custom-model registration + dimension
-rebuild).
+The shipped embedder is **int8-quantized BGE-M3** — the model the system actually runs on and is
+measured against. BGE-M3's geometry is what makes distal association work (it recovers bridge records
+that smaller models bury); the int8 quantization is what makes it affordable on the hot path. Measured
+on CPU, in-process, median of 7:
+
+| prompt chars | 40 | 400 | 800 | 1,600 | 3,200 |
+|---|---|---|---|---|---|
+| embed latency | 21 ms | 81 ms | 153 ms | 360 ms | 912 ms |
+
+Through the live daemon a 3,200-char prompt returns in ~840 ms wall — under the 2 s deadline that
+used to be breached by fp32 (~2.1 s embed alone). Fixed costs vs fp32: **~0.98 GB** resident RAM
+(vs ~1.55 GB), **1.8 s** load+warmup (vs 5.1 s), **568 MB** self-contained on disk (vs ~2.27 GB),
+full re-embed of a ~6.5k-record collection in **~13 min** (vs ~54 min). Rank parity against fp32:
+one boundary flip out of 155 association targets — quantization jitter, no systematic loss. The
+daemon guards embedder identity with a **semantic canary at every warmup** (the HF revision cannot
+be pinned by `fastembed`; a wrong artifact refuses to serve rather than emit garbage). Details,
+procedures, and the fp32 rollback: [docs/embedding-options.md](docs/embedding-options.md).
 
 **`[llm]`** — the offline distillation step.
 
@@ -162,6 +201,71 @@ surfaced records as a lossy *pointer* to their source, a prior to verify, not ev
 The format follows [Keep a Changelog](https://keepachangelog.com); the project uses
 [Semantic Versioning](https://semver.org). All 0.x releases are proof-of-concept —
 minor versions may still move fast.
+
+### 0.3.0 — 2026-07-22
+
+**Added**
+
+- **int8 BGE-M3 embedder as the shipped default.** `onnx-community/bge-m3-ONNX-int8`
+  (1024-dim, custom-registered automatically): BGE-M3 retrieval geometry at roughly half
+  the RAM and 2.3–3× the speed of fp32 — a 3,200-char prompt embeds in ~912 ms instead of
+  ~2.1 s. A **semantic canary at every daemon warmup** (startup + reload) guards embedder
+  identity: on failure `/v1/spread` refuses and the hook degrades to lexical fallback
+  instead of serving garbage similarities. Measured numbers and procedures in
+  [docs/embedding-options.md](docs/embedding-options.md).
+- **Response-seed.** The walk's second seed is now live: the hook recovers the assistant's
+  previous reply from the session transcript tail and feeds its last ~1,200 chars to the
+  semantic seed (never the lexical bucket). The slice shape was chosen empirically —
+  tail-only beat head+tail variants on carrier-injection coverage.
+- **Turn-gate: full or whisper, never silence.** Every hook turn primes either full or as a
+  whisper (top `whisper_k`=5 semantic + `whisper_lex_k`=3 lexical) on three triggers: weak
+  associative field (top score < `turn_floor`, rendered with an explicit weak-field
+  marker), execution regime (`tool_density ≥ regime_density`), or `<task-notification>`
+  turns. First `kickoff_turns`=3 turns are exempt; unknown features fail open toward more
+  priming; MCP/CLI pulls are never gated; `turn_floor = 0` rolls the whole gate back.
+- **Uncensored priming telemetry.** Every echo line now carries `client_ms` (hook-side wall
+  time — survives deadline breaches that censor `spread_ms`), `prompt_len`, `prev_len`,
+  `seed_len`, and `gated`; `prime echoes --stats` renders per-day health: turns by source,
+  empty-rate, latency percentiles with breach counts, whisper counts, response-seed health.
+- **Daemon operability.** `prime daemon status --all` inventories every live daemon process
+  and flags strays (running, listening, holding RAM, owning no endpoint — invisible to
+  clients); hook-triggered autostart is rate-limited by a 90 s cooldown so a misfiring
+  staleness check can't spawn a fleet (explicit `prime daemon start` bypasses it); daemon
+  log lines carry `pid=` for per-instance attribution.
+- **Extraction contract v4.1 — post-draft gates.** Extraction now runs three mechanical
+  gates over the full draft list before emitting: compression (scripted word count, hard
+  fail over 20), working-session residue (drop bookkeeping that leads with no transferable
+  principle), and anchor verification (batched snippet-located offsets, never estimated).
+
+**Changed**
+
+- **Client deadline 800 ms → 2,000 ms, paired with a user-first seed budget.** The deadline
+  is a ceiling on the tail, not a per-turn tax: typical turns are governed by
+  `seed_char_budget` (5,000 chars; the user prompt is never truncated — the response-seed
+  takes what remains, and only notification seeds may be cut).
+- **Lexical fallback joins with OR + BM25.** The previous implicit-AND join required every
+  prompt token to appear in a ≤20-word summary — structurally dead on prompts over ~15
+  tokens, exactly the long-prompt breach case it exists for. Tokens are now deduped,
+  capped at 64, OR-joined, BM25-ranked; a breach degrades to lexical priming instead of
+  silence.
+- **`/v1/reload` now swaps the full config.** `[bridge]` knob edits and the model name
+  apply on the nightly reload, not only on a full restart — knob tuning and rollbacks
+  behave as documented.
+- **The write-cycle lock is a real OS lock** (`msvcrt`/`flock`), replacing an
+  exists-then-write lockfile with a TOCTOU window; a crashed cycle releases implicitly.
+
+**Fixed**
+
+- An empty semantic bucket now whispers with the weak-field marker instead of slipping
+  through as full, and the lexical fallback keeps the whisper cap on whispered turns
+  instead of silently widening to 10 unmarked records.
+- Unknown `turn_idx` (unreadable echo history) counts as kickoff — fail open toward full
+  priming, never toward a lost exemption.
+- Transcript tail reads tolerate a UTF-8 BOM; echoes state writes are atomic.
+- The `VecIndexConfig` default now matches the live collection (a missing `settings.toml`
+  could silently query a 1024-dim collection with a 384-dim model).
+- A test fixture's hardcoded date aged out of its retention window and turned the suite
+  permanently red; dates are now relative.
 
 ### 0.2.0 — 2026-07-13
 

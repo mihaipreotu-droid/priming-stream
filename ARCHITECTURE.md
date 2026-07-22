@@ -42,7 +42,8 @@ storage/
 - **`records`** holds the live substrate. **`records_staging`** holds a cycle's incoming records before
   they are promoted (invisible to priming until then). **`records_trash`** holds soft-deleted records
   (reversible via `prime record restore`).
-- **ChromaDB** (local embeddings via `fastembed`, MiniLM-L12-v2, 384-dim) and the **SQLite FTS5** index
+- **ChromaDB** (local embeddings via `fastembed`, int8-quantized BGE-M3, 1024-dim — see
+  [docs/embedding-options.md](docs/embedding-options.md)) and the **SQLite FTS5** index
   are both **derived** from `graph.db` and rebuildable (`prime vec-index-rebuild`). The embeddings run
   in-process — no third-party API, no remote calls.
 - Backups are local snapshots of the DB (`prime db-snapshot`); the substrate never leaves the machine.
