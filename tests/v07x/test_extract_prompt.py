@@ -43,12 +43,14 @@ def test_extract_prompt_size_reasonable():
     intra-conversation retraction/correction subsection (Caz A of the supersedence
     decision, ~511), then the transferability test as a second primary filter
     (transfers-cross-context vs in-scope process/build residue, ephemeral lookups,
-    bare state-snapshots; from the 2026-06-17 relevance audit, ~584). Soft ceiling
-    raised to 620 to catch accidental blowup without flagging the deliberate
-    contract growth."""
+    bare state-snapshots; from the 2026-06-17 relevance audit, ~584), then the
+    post-draft gates section (compression / CC-residue / anchor verification;
+    from the 2026-07-19 extraction audit, ~699). Soft ceiling raised to 760
+    to catch accidental blowup without flagging the deliberate contract
+    growth."""
     text = PROMPT_PATH.read_text(encoding="utf-8")
     lines = text.splitlines()
-    assert 30 <= len(lines) <= 620, f"prompt has {len(lines)} lines"
+    assert 30 <= len(lines) <= 760, f"prompt has {len(lines)} lines"
 
 
 def test_extract_prompt_mentions_granularity():
@@ -80,4 +82,3 @@ def test_s3a_binding_contract_header_note():
     head = "\n".join(lines[:12]).lower()
     assert "binding" in head, "binding-contract header note missing near top"
     assert "contract" in head, "binding-contract header note missing near top"
-

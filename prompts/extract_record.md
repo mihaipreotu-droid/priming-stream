@@ -1,4 +1,4 @@
-# Record extraction — v0.7-x
+# Record extraction — v4.1 (v0.7-x)
 
 > **Binding contract.** This file is the binding extraction contract for the
 > Priming Stream sleep cycle. Sub-agents read it directly via the Read
@@ -582,6 +582,106 @@ turn — many of them at once. Each must earn its slot.
   chunks verify" — if a record is used in a high-stakes decision, fetch
   the source chunk via ``graph_chunk_around_anchor`` to verify the
   summary against original text.
+
+## Post-draft gates (binding)
+
+**Draft first, then gate, then emit.** Build the conversation's full
+candidate list, then run the three gates below over every draft record,
+in order, and only then write the results. The gates exist because the
+extraction audit (2026-07) showed these exact failure modes surviving
+drafting while "feeling fine" — run them mechanically, as a separate
+pass, not impressionistically while drafting.
+
+### Gate 1 — Compression (word count + one claim)
+
+For each draft summary:
+
+1. **Count the words MECHANICALLY — the same batched script that
+   verifies anchors (Gate 3) also prints each summary's word count.**
+   Never self-estimate: "~22, close enough" is exactly how the cap has
+   been violated for weeks. The leading subject anchor, a
+   `DECIS:`/`OUTCOME:` prefix, and parenthetical acronyms are free;
+   everything else counts. **Script count > 20 = hard fail — there is
+   no tolerance band; 21 fails.** Tighten or split, then re-run the
+   check on the rewritten summary.
+2. **Re-test one-claim:** can any beat in the summary stand alone as its
+   own record? Yes → split. "and" / "plus" / multi-comma enumeration of
+   claims is the classic signal.
+3. **Framework exception ≠ length licence.** A named framework /
+   taxonomy / elimination stays ONE record — but it must still fit the
+   cap. A taxonomy that doesn't fit in ~20 words compresses its parts to
+   a terse keyword tail (*"— parts: X, Y, Z"*) or drops to the
+   reasoning-unit conclusion it carries. A 45-word "framework" summary
+   is a violation, not an exception.
+
+Guard: the split move is for summaries packing *unrelated* claims. Never
+fragment one structure to satisfy the count — for a structure the choice
+is compress-or-demote, not shred.
+
+### Gate 2 — Residue (working sessions: `claude_code` or any build/tooling source)
+
+For each draft record from a working session, test the LEAD: **does the
+summary lead with a named, transferable principle — something a future
+session on different work could act on?** If the lead is bookkeeping of
+this session's own work, DROP — even when dyad-anchored and accurate.
+Four real emitted-then-audited negatives (all scored zero
+transferability; names anonymized), with the class each represents:
+
+- ✗ Run-stats / counts of the session's own artifact: *"Corpus
+  structure: 1 floor sanity + 7 cross-project association prompts + 4
+  control (the memory layer should be irrelevant) = 12 prompts; later
+  expanded to 4 retrieval + 7 association + 4 control = 15."*
+- ✗ Incident bookkeeping (numbers, no lesson): *"Acme-CLI.
+  Leftover staging triggered 2413 judge-pairs (~61 batches), escalating
+  \"ingest 40\" into a multi-cycle recovery operation — orchestrator
+  stopped per scope discipline, substrate untouched."*
+- ✗ Micro-fix tied to one file, with its exact command (repo/git
+  already hold it): *"In Acme-CLI workflow.js files, the only hardcoded
+  path is the INDEX/MANIFEST constant read by one Load agent; all other
+  paths come from the index/manifest written by plan.py with
+  repo-root-relative paths — fix = Load agent resolves repo-root via
+  git rev-parse --show-toplevel."*
+- ✗ Public news, fully retrievable (fails dyad-anchor too): *"Vendor
+  desktop redesign 07-07: the "Cowork" tab removed from the UI;
+  interactive computer-use folded into Chat; Dispatch (async
+  phone→desktop tasks, launched 17-03) promoted standalone."*
+
+Also DROP: spec-snapshots without the decision they grounded (perishable
+state), build/test status, cycle run metrics — **and counts/composition
+of the session's own artifact even when phrased as a "final design" or a
+decision (*"final corpus: 4 retrieval + 7 association + 4 control = 15"*
+is STILL the run-stats negative above, re-packaged). The motivation
+behind a design choice can be a record; its numbers are not.**
+
+**Guard — the failure is the missing principle, not the presence of
+numbers or commands.** These KEEP-classes stand, exactly as before:
+gotcha lessons that lead with the principle (*"Positional array indexing
+in parallel worker assignment causes skip/duplicate bugs; fix = explicit
+ids — seen in Acme-CLI"* — command-level detail kept as provenance),
+episode records whose temporal arc IS the evidence,
+decision-motivations, durable assets. If a draft CAN be rewritten to
+lead with a genuine transferable principle, rewrite it; if there is no
+principle to lead with, drop it.
+
+### Gate 3 — Anchor verification (mechanical, batched)
+
+The anchor is the dyad's verification chain ("records prime, chunks
+verify"); an offset landing on frontmatter, JSON scaffolding, tool
+output, or an unrelated turn silently breaks it. Never estimate offsets
+by eye:
+
+1. For each record choose a short, distinctive verbatim snippet (10–40
+   chars) from the chunk text that carries the record's claim.
+2. In ONE batched tool call per conversation (not per record), run a
+   small script that strips each chunk's frontmatter and prints, per
+   record: the summary's word count (Gate 1), `start =
+   body.find(snippet)`, the `end` you intend, and `body[start:end]`.
+3. Confirm each printed slice brackets the record's key entities /
+   claim. A slice on boilerplate → fix the snippet, recompute.
+4. Don't stall: if a snippet won't locate after one retry, anchor to
+   the containing turn's span, or (last resort) the whole chunk (`0`,
+   body length) — an honest coarse anchor beats a precise-looking wrong
+   one. Never drop a record over its anchor.
 
 ## Conventions
 
