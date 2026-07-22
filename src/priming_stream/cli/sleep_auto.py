@@ -32,13 +32,14 @@ import sys
 import time
 from pathlib import Path
 
+from priming_stream.core import write_lock
 from priming_stream.core.config import load_config
 from priming_stream.core.episodic import EpisodicStore
 from priming_stream.core.models import now_iso
 from priming_stream.core.paths import ensure_dirs, resolve_paths
 from priming_stream.ingest.claude_code import ClaudeCodeAdapter
 
-_LOCK_NAME = ".sleep_auto.lock"
+_LOCK_NAME = write_lock.LOCK_NAME  # single source: core.write_lock
 _LOG_NAME = "sleep_auto.log"
 _DEFAULT_SETTLED_MIN = 30
 _DEFAULT_LOCK_STALE_MIN = 180  # a cycle older than this → assume dead, take over
@@ -154,48 +155,29 @@ def _pending_count(paths, cfg) -> int:
     return 0 if skipping and last_seen is not None else n
 
 
-def _pid_alive(pid: int) -> bool:
-    """True if a process with this PID currently exists (Windows-safe via tasklist)."""
-    try:
-        out = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout
-        return str(pid) in out
-    except Exception:  # noqa: BLE001 - uncertain → assume alive (never steal a live lock)
-        return True
+# 2026-07-21 review: the old exists()-then-write lockfile had a seconds-
+# wide TOCTOU window; the lock is now a REAL OS file lock in
+# ``core.write_lock`` (atomic acquire, auto-release on process death — the
+# stale-age / PID-liveness heuristics went with the race). The handle lives
+# in a module global for the duration of the cycle; ``stale_minutes`` is
+# kept in the signature for existing callers but is unused.
+_LOCK_HANDLE: object | None = None
 
 
-def _acquire_lock(paths, stale_minutes: int) -> bool:
-    lock = paths.storage_dir / _LOCK_NAME
-    if lock.exists():
-        # A holder that died mid-cycle (crash / laptop sleep) leaves a lock the age
-        # check would honor for up to stale_minutes (3h) — the loop then spins
-        # "lock held" doing nothing. Take it over immediately if the holder PID is
-        # gone; only fall back to the age heuristic when the holder is still alive.
-        holder_dead = False
-        try:
-            holder = int(lock.read_text(encoding="utf-8").split()[0])
-            holder_dead = not _pid_alive(holder)
-        except (OSError, ValueError, IndexError):
-            holder_dead = False
-        if not holder_dead:
-            try:
-                age_min = (time.time() - lock.stat().st_mtime) / 60.0
-            except OSError:
-                age_min = 0
-            if age_min < stale_minutes:
-                return False  # a live cycle holds it
-    paths.storage_dir.mkdir(parents=True, exist_ok=True)
-    lock.write_text(f"{os.getpid()} {now_iso()}\n", encoding="utf-8")
+def _acquire_lock(paths, stale_minutes: int = 0) -> bool:  # noqa: ARG001
+    global _LOCK_HANDLE
+    handle = write_lock.acquire(paths.storage_dir, holder_note=now_iso())
+    if handle is None:
+        return False
+    _LOCK_HANDLE = handle
     return True
 
 
-def _release_lock(paths) -> None:
-    try:
-        (paths.storage_dir / _LOCK_NAME).unlink()
-    except OSError:
-        pass
+def _release_lock(paths) -> None:  # noqa: ARG001 - signature kept for callers
+    global _LOCK_HANDLE
+    handle = _LOCK_HANDLE
+    _LOCK_HANDLE = None
+    write_lock.release(handle)
 
 
 # -- command --------------------------------------------------------------

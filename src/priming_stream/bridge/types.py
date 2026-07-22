@@ -44,3 +44,10 @@ class PrimingResult:
     """
     semantic: list[ScoredRecord]
     lexical: list[ScoredRecord]
+    # P2/P3 turn-gate provenance (2026-07-21, final amendment: full or
+    # whisper, never silence). "full" (no gating / gate off / kickoff),
+    # "whisper-floor" (turn top under cfg.turn_floor — rendered with the
+    # weak-field marker), "whisper-regime" (tool-dense turn), or
+    # "whisper-notification" (<task-notification> turn). Whisper = top
+    # cfg.whisper_k semantic + top cfg.whisper_lex_k lexical.
+    gated: str = "full"

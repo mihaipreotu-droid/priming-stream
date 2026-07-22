@@ -29,6 +29,26 @@ recency_p_max = 0.5          # A.5b penalty ceiling.
 bucket_total = 25            # shared priming budget (semantic + lexical).
 bucket_lexical = 5           # bucket B cap; semantic budget = bucket_total - bucket_lexical.
 recency_filter_cutoff = ""   # A.5c hard cutoff date; "" = off (stretch).
+# Seed char budget (paired with the 2s client deadline): user-first
+# allocation. The user prompt is NEVER truncated; the response-seed (the
+# assistant's previous reply) takes what remains up to this total. 0 = no cap.
+seed_char_budget = 5000
+# Cross-turn dedup: records primed in the last N turns of the same session
+# are suppressed so freed slots surface fresh records. 0 = off.
+dedup_window_turns = 10
+# Turn-gate: ONE mechanism, TWO outputs — FULL or WHISPER, never silence.
+# Applies only to the hook push path; MCP/CLI pulls stay full. turn_floor=0
+# switches the ENTIRE gate off (one-knob rollback). Kickoff (the first
+# kickoff_turns of a session) always primes full. Whisper = top whisper_k
+# semantic + top whisper_lex_k lexical, on three triggers: turn top score
+# under turn_floor (rendered with a "weak associative field" marker),
+# execution regime (tool_density >= regime_density), <task-notification>
+# turns.
+turn_floor = 0.40
+regime_density = 0.6
+whisper_k = 5
+whisper_lex_k = 3
+kickoff_turns = 3
 
 [llm]
 # Empty = SDK/Claude Code default. Set "sonnet" or "opus" to pin a model.
@@ -45,5 +65,9 @@ read_only = true
 # ``persist_dir`` resolves under storage_dir when relative (same
 # convention as ``paths.exports_dir``). ``model_name`` is the
 # fastembed.TextEmbedding model id.
+# int8-quantized bge-m3 (custom model registered in
+# integrations/vec_index.py; see docs/embedding-options.md for the
+# measured latency/RAM/quality numbers and the rollback procedure:
+# set "BAAI/bge-m3" + `prime vec-index-rebuild`).
 persist_dir = "vec_index/chroma"
-model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+model_name = "onnx-community/bge-m3-ONNX-int8"

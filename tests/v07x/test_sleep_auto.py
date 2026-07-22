@@ -54,21 +54,26 @@ def test_settled_sessions_missing_dir_is_empty(tmp_path):
 # -- lock ----------------------------------------------------------------
 
 
-def test_lock_blocks_concurrent_then_takes_over_stale(tmp_path):
+def test_lock_is_real_os_lock(tmp_path):
+    """The write-cycle lock is a REAL OS lock — atomic
+    acquire, no TOCTOU, released by release (or by process death). The
+    lockFILE persists between cycles; existence means nothing."""
+    from priming_stream.core import write_lock
+
     paths = SimpleNamespace(storage_dir=tmp_path)
-
-    # first acquire succeeds
-    assert sleep_auto._acquire_lock(paths, stale_minutes=180) is True
-    # a second concurrent acquire is blocked (lock is fresh)
-    assert sleep_auto._acquire_lock(paths, stale_minutes=180) is False
-
-    # age the lock past the stale threshold → next acquire takes over
     lock = tmp_path / sleep_auto._LOCK_NAME
-    old = time.time() - 999 * 60
-    os.utime(lock, (old, old))
-    assert sleep_auto._acquire_lock(paths, stale_minutes=180) is True
+
+    # first acquire succeeds and is observable via the probe
+    assert sleep_auto._acquire_lock(paths) is True
+    assert write_lock.is_held(tmp_path) is True
+    # a concurrent acquire (fresh handle, same byte-0 region) is blocked
+    assert write_lock.acquire(tmp_path) is None
 
     sleep_auto._release_lock(paths)
-    assert not lock.exists()
-    # releasing a non-existent lock is harmless
+    # the OS lock is gone; the FILE deliberately persists (probe, not exists)
+    assert write_lock.is_held(tmp_path) is False
+    assert lock.exists()
+    # re-acquire after release works; releasing twice is harmless
+    assert sleep_auto._acquire_lock(paths) is True
+    sleep_auto._release_lock(paths)
     sleep_auto._release_lock(paths)

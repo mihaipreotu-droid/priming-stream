@@ -12,7 +12,7 @@ v0.7-x-vec-index surface (spec §4.6 / brief §G):
     graph_chunk_around_anchor  — §16.6 verification path (file IO only)
     graph_spread               — bridge.spread on arbitrary text
     graph_stats                — records + sleep + vec_index size
-    graph_disambiguate         — bridge over LLM reformulation
+    graph_disambiguate       — bridge over LLM reformulation
     graph_salient_context      — pull-bridge for Claude Desktop
 
 Dropped vs v0.7: ``graph_search_node``, ``graph_neighbors``, ``graph_path``,
@@ -112,10 +112,12 @@ def graph_chunk_around_anchor(repo: GraphRepo, args: dict) -> dict:
 def graph_spread(repo: GraphRepo, args: dict) -> list[dict]:
     """Run the bridge A-pipeline on arbitrary text and return ranked records.
 
-    Uses ``walk_two_seeds(text, "")`` (single-seed: prompt only, no prev)
-    capped to ``cfg.bridge.max_records`` — the raw-spread output cap for
-    deliberate MCP/CLI surfaces. Output carries ``source_date`` and ``kind``
-    for parity with the search tools.
+    Calls ``build_priming(text, "")`` — the FULL pipeline (two-seed walk with
+    empty prev, recency-weighted ``select_semantic``, lexical bucket), then
+    merges semantic-first and caps at ``cfg.bridge.max_records``. No turn
+    features are sent, so the P2/P3 turn-gate never applies here (deliberate
+    pull surface). Output carries ``source_date`` and ``kind`` for parity
+    with the search tools.
     """
     text = str(args.get("text", "") or "")
     if not text.strip():

@@ -119,7 +119,8 @@ def test_r3a_after_failed_reload_spread_still_serves_old_state(
     captured = {}
 
     def _fake_build_priming(prompt, prev, *, vec_index, repo, conn, cfg,
-                            now=None, exclude_recent_ids=frozenset()):
+                            now=None, exclude_recent_ids=frozenset(),
+                            turn_features=None):
         captured["count"] = vec_index.count()
         return PrimingResult(semantic=[], lexical=[])
     monkeypatch.setattr(server, "build_priming", _fake_build_priming)

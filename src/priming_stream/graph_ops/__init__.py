@@ -16,14 +16,16 @@ from priming_stream.graph_ops.records_search import (
     graph_search_lexical,
     graph_search_records,
 )
-from priming_stream.graph_ops.spread_op import graph_spread_op
 from priming_stream.graph_ops.stats import graph_stats
+
+# graph_spread_op deleted (2026-07-21 review; zero production
+# callers — the deliberate pull surfaces are MCP ``graph_spread`` and
+# ``prime search``, both on ``build_priming``.
 
 __all__ = [
     "graph_search_records",
     "graph_search_lexical",
     "graph_records",
     "graph_chunk_around_anchor",
-    "graph_spread_op",
     "graph_stats",
 ]

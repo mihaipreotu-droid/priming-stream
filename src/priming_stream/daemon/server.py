@@ -67,6 +67,14 @@ _model_name: str = ""  # mirrored from cfg.vec_index.model_name; see /v1/health 
 # ``_vec_index`` set (so /v1/health can report records_count etc.),
 # but ``model_loaded`` must reflect actual usability.
 _model_warm_ok: bool = False
+# Embedder-identity canary (2026-07-21 review; fastembed
+# cannot pin HF revisions, so a cache wipe can silently re-fetch a
+# DIFFERENT artifact. At every warmup (startup + reload) a related/
+# unrelated sentence pair must separate cleanly; failure flips this to
+# False and /v1/spread refuses (503) so the hook degrades to its lexical
+# fallback instead of serving garbage embeddings. Defaults True so unit
+# tests that monkeypatch the singletons are unaffected.
+_canary_ok: bool = True
 
 _logger = logging.getLogger("priming_stream.daemon")
 
@@ -90,8 +98,16 @@ def _setup_logging() -> None:
         backupCount=3,
         encoding="utf-8",
     )
+    # ``pid=`` is load-bearing, not decoration: every instance appends to the
+    # same daemon.log, and only the startup lines carry a port. In the
+    # 2026-07-16 ghost investigation that made per-line attribution
+    # impossible — "which of the live daemons served this spread?" had no
+    # answer in the log. PID restores it; the pid→port map is published once
+    # by the "listening on" line.
     handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        logging.Formatter(
+            "%(asctime)s %(levelname)s pid=%(process)d %(name)s %(message)s"
+        )
     )
     _logger.addHandler(handler)
     _logger.propagate = False
@@ -105,7 +121,7 @@ def _init_state() -> None:
     pay the ~2-3s model-load cost on their first prompt after autostart.
     """
     global _started_at, _started_monotonic, _vec_index, _repo, _conn
-    global _bridge_cfg, _model_name, _model_warm_ok
+    global _bridge_cfg, _model_name, _model_warm_ok, _canary_ok
     cfg = load_config()
     paths = resolve_paths(cfg)
     _started_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -118,6 +134,7 @@ def _init_state() -> None:
         _model_warm_ok = True
     except Exception as exc:  # noqa: BLE001
         _logger.warning("warmup search failed: %s", exc)
+    _canary_ok = _run_canary(_vec_index) if _model_warm_ok else False
     # ThreadingHTTPServer dispatches each request on a worker thread, but
     # the connection here is opened on the main thread at startup. SQLite
     # by default refuses cross-thread access. Pass ``check_same_thread=False``
@@ -137,6 +154,54 @@ def _init_state() -> None:
         DAEMON_VERSION,
         _vec_index.count(),
     )
+
+
+def _run_canary(index) -> bool:
+    """Embedder-identity gate (guards the unpinnable HF revision).
+
+    Embeds a related pair + an unrelated control through the PRODUCTION
+    embed path (``embed_texts``) and requires clean separation. Thresholds
+    sit far under the healthy measured values (int8 bge-m3: related ~0.80,
+    unrelated ~0.40, separation ~0.40) but far above the failure modes
+    they guard: a weightless/wrong artifact gives near-random cosines
+    (separation ≈ 0), a wrong-dimension model crashes earlier. Failure is
+    logged loudly; the caller flips ``_canary_ok`` and /v1/spread refuses.
+    """
+    embed = getattr(index, "embed_texts", None)
+    if embed is None:
+        # Only bare test stubs lack embed_texts (RecordsVecIndex always has
+        # it) — treat as pass rather than poisoning the module-global gate
+        # from an unrelated test's reload.
+        return True
+    try:
+        vecs = embed([
+            "the cat sits on the rug in the living room",
+            "a cat settles down on the carpet in the room",
+            "the quarterly sales report was published yesterday",
+        ])
+        import math
+        def _cos(u, v):
+            nu = math.sqrt(sum(x * x for x in u))
+            nv = math.sqrt(sum(x * x for x in v))
+            if nu == 0 or nv == 0:
+                return 0.0
+            return sum(a * b for a, b in zip(u, v)) / (nu * nv)
+        rel = _cos(vecs[0], vecs[1])
+        unrel = _cos(vecs[0], vecs[2])
+        ok = (rel > unrel + 0.15) and (rel > 0.55)
+        if ok:
+            _logger.info("canary ok related=%.3f unrelated=%.3f", rel, unrel)
+        else:
+            _logger.error(
+                "CANARY FAILED related=%.3f unrelated=%.3f — embedder "
+                "identity suspect (cache re-fetch of a different artifact?); "
+                "/v1/spread will refuse until a healthy warmup",
+                rel, unrel,
+            )
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        _logger.error("canary errored: %s — refusing semantic serving", exc)
+        return False
 
 
 def _clear_chroma_system_cache() -> None:
@@ -222,6 +287,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_spread(self) -> None:
         try:
+            if not _canary_ok:
+                # Embedder identity unverified (see _run_canary) — refuse
+                # rather than serve garbage similarities; the hook client
+                # treats non-200 as None and falls back to lexical.
+                self._send_json(503, {"error": "embedder canary failed"})
+                return
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length) if length > 0 else b"{}"
             req = json.loads(raw.decode("utf-8") or "{}")
@@ -238,11 +309,26 @@ class _Handler(BaseHTTPRequestHandler):
             recent_ids = frozenset(
                 str(r) for r in raw_recent if r
             ) if isinstance(raw_recent, list) else frozenset()
+            # P2/P3 turn-gate: the hook push path sends turn features; their
+            # absence (MCP/CLI/tests) leaves gating off for that request.
+            turn_features = None
+            if "turn_idx" in req or "tool_density" in req or "notification" in req:
+                try:
+                    ti = req.get("turn_idx")
+                    td = req.get("tool_density")
+                    turn_features = {
+                        "turn_idx": int(ti) if ti is not None else None,
+                        "tool_density": float(td) if td is not None else None,
+                        "notification": bool(req.get("notification")),
+                    }
+                except (TypeError, ValueError):
+                    turn_features = None
             t0 = time.monotonic()
             priming = build_priming(
                 prompt, prev,
                 vec_index=_vec_index, repo=_repo, conn=_conn, cfg=_bridge_cfg,
                 exclude_recent_ids=recent_ids,
+                turn_features=turn_features,
             )
             elapsed_ms = (time.monotonic() - t0) * 1000.0
             sem_items, lex_items = priming_items(priming)
@@ -250,14 +336,17 @@ class _Handler(BaseHTTPRequestHandler):
                 "semantic": sem_items,
                 "lexical": lex_items,
                 "spread_ms": round(elapsed_ms, 2),
+                "gated": priming.gated,
                 "daemon_version": DAEMON_VERSION,
             }
             _logger.info(
-                "spread session=%s prompt_len=%d semantic=%d lexical=%d ms=%.1f",
+                "spread session=%s prompt_len=%d semantic=%d lexical=%d "
+                "gated=%s ms=%.1f",
                 session_id,
                 len(prompt),
                 len(priming.semantic),
                 len(priming.lexical),
+                priming.gated,
                 elapsed_ms,
             )
             self._send_json(200, body)
@@ -287,6 +376,7 @@ class _Handler(BaseHTTPRequestHandler):
         a malformed JSON body still triggers a reload (the body is unused).
         """
         global _vec_index, _model_warm_ok, _conn, _repo
+        global _bridge_cfg, _model_name, _canary_ok
         # Drain any request body so the client side doesn't see a broken
         # pipe; contents are ignored per spec.
         try:
@@ -320,6 +410,7 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as warm_exc:  # noqa: BLE001
                 _logger.warning("reload warmup search failed: %s", warm_exc)
                 warm_ok = False
+            canary_ok = _run_canary(new_index) if warm_ok else False
             # Build a fresh SQLite connection + GraphRepo so records added
             # since daemon startup are visible to subsequent /v1/spread calls.
             # We open the new connection BEFORE the atomic swap so we never
@@ -337,8 +428,16 @@ class _Handler(BaseHTTPRequestHandler):
             # at entry; they continue against old_index / old_conn unaffected.
             _vec_index = new_index
             _model_warm_ok = warm_ok
+            _canary_ok = canary_ok
             _conn = new_conn
             _repo = new_repo
+            # 2026-07-21 review: reload must pick up the CURRENT config, not
+            # keep the startup snapshot — [bridge] knob edits (Phase 5
+            # calibration, gate tuning, rollbacks) apply on the nightly
+            # reload instead of silently no-oping until a full restart.
+            # Same for _model_name, so /v1/health reports the live model.
+            _bridge_cfg = cfg.bridge
+            _model_name = cfg.vec_index.model_name
             # Close old connection AFTER swap — in-flight requests already
             # hold the old reference and will finish normally.
             if old_conn is not None:
@@ -391,6 +490,15 @@ def run_server(
     detached parent (which isn't listening) and never write to stdout.
     """
     _setup_logging()
+    # Startup identity, logged before anything can go wrong. ``dir=`` is the
+    # one that matters: the 2026-07-16 investigation could not rule out "this
+    # instance logs to a different daemon_dir" from the log itself, because
+    # the log never said which directory it was. It does now — and the line
+    # is written to the same directory it names, so the claim is self-proving.
+    _logger.info(
+        "daemon process start pid=%d dir=%s exe=%s cwd=%s",
+        os.getpid(), lifecycle.daemon_dir(), sys.executable, os.getcwd(),
+    )
     _logger.info("acquiring daemon lock")
     lock_handle: object | None = None
     try:

@@ -20,14 +20,19 @@ Subcommands:
   endpoint file and releases the lock on its own next start), then
   poll for clean shutdown for up to 3s.
 * ``status`` — read endpoint file, GET ``/v1/health``; print uptime,
-  records_count, model_name, daemon_version.
+  records_count, model_name, daemon_version. With ``--all``, also inventory
+  every live daemon process (psutil) and flag strays — instances that run,
+  listen and hold memory while owning no endpoint, so no client can reach
+  them. That shape cost hours of invisible RAM on 2026-07-16.
 * ``restart`` — stop + start --background.
 
 Exit codes:
     0 — success (daemon running on ``status``; daemon stopped on
         ``stop``; daemon spawned on ``start --background``).
     1 — failure (daemon not running on ``status`` / ``stop``; autostart
-        timeout; endpoint reachable but unhealthy).
+        timeout; endpoint reachable but unhealthy; or, with
+        ``status --all``, a healthy endpoint alongside stray instances —
+        the picture is wrong even though the daemon answers).
 """
 from __future__ import annotations
 
@@ -73,7 +78,10 @@ def _cmd_start(args: argparse.Namespace) -> int:
         return 1
 
     if getattr(args, "background", False):
-        lifecycle.autostart_daemon()
+        # force=True: the autostart cooldown exists to stop a misfiring
+        # staleness check from spawning daemons behind the user's back. A
+        # human typing `daemon start` is the opposite of that case.
+        lifecycle.autostart_daemon(force=True)
         deadline = time.monotonic() + _AUTOSTART_TIMEOUT_S
         while time.monotonic() < deadline:
             time.sleep(0.5)
@@ -152,8 +160,97 @@ def _cmd_stop(args: argparse.Namespace) -> int:  # noqa: ARG001
 # ---------------------------------------------------------------- status
 
 
-def _cmd_status(args: argparse.Namespace) -> int:  # noqa: ARG001
+def _daemon_instances() -> list[dict]:
+    """Enumerate live ``-m priming_stream.daemon.server`` processes.
+
+    Returns one dict per instance: ``pid``, ``started`` (local time string),
+    ``ports`` (TCP ports in LISTEN), ``rss_mb`` (resident, NOT commit — see
+    ``--all`` output note). Empty list if psutil is unavailable or nothing
+    matches. Never raises: a process that dies mid-scan, or one we may not
+    query, is skipped rather than failing the whole report.
+    """
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001 - diagnostics must not hard-fail
+        return []
+
+    out: list[dict] = []
+    for proc in psutil.process_iter(["pid", "cmdline", "create_time"]):
+        try:
+            cmdline = proc.info.get("cmdline") or []
+            if not any("priming_stream.daemon.server" in str(p) for p in cmdline):
+                continue
+            try:
+                ports = sorted({
+                    c.laddr.port
+                    for c in proc.net_connections(kind="tcp")
+                    if c.status == psutil.CONN_LISTEN
+                })
+            except Exception:  # noqa: BLE001
+                ports = []
+            try:
+                rss_mb = round(proc.memory_info().rss / (1024 * 1024))
+            except Exception:  # noqa: BLE001
+                rss_mb = 0
+            out.append({
+                "pid": proc.info["pid"],
+                "started": time.strftime(
+                    "%Y-%m-%d %H:%M:%S",
+                    time.localtime(proc.info["create_time"]),
+                ),
+                "ports": ports,
+                "rss_mb": rss_mb,
+            })
+        except Exception:  # noqa: BLE001 - NoSuchProcess / AccessDenied / …
+            continue
+    return sorted(out, key=lambda i: i["pid"])
+
+
+def _report_instances(endpoint_pid: int | None) -> int:
+    """Print the live-instance inventory; return the count of strays.
+
+    A stray is a live daemon process that does not own the endpoint file —
+    the 2026-07-16 shape: fully loaded, listening, invisible to every client
+    (which only ever reads ``daemon.json``), and costing ~1.5GB of resident
+    memory for nothing. Task Manager hides it well: an idle instance gets
+    paged out, so its working set reads near-zero while its commit charge
+    does not.
+    """
+    instances = _daemon_instances()
+    if not instances:
+        print("instances: none found (psutil unavailable, or no daemon running)")
+        return 0
+
+    print(f"instances: {len(instances)} live `-m priming_stream.daemon.server`")
+    strays = 0
+    for inst in instances:
+        ports = ",".join(str(p) for p in inst["ports"]) or "-"
+        owns = inst["pid"] == endpoint_pid
+        tag = "endpoint owner" if owns else "STRAY (not in daemon.json)"
+        if not owns:
+            strays += 1
+        print(
+            f"  pid={inst['pid']:<8} started {inst['started']}  "
+            f"listening {ports:<12} rss {inst['rss_mb']}MB  <- {tag}"
+        )
+    return strays
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    show_all = getattr(args, "all", False)
+    strays = 0
     info = lifecycle.read_endpoint()
+
+    if show_all:
+        endpoint_pid = None
+        if isinstance(info, dict):
+            try:
+                endpoint_pid = int(info.get("pid") or 0) or None
+            except (TypeError, ValueError):
+                endpoint_pid = None
+        strays = _report_instances(endpoint_pid)
+        print()
+
     if not info or lifecycle.is_endpoint_stale(info):
         print("daemon not running")
         return 1
@@ -192,6 +289,12 @@ def _cmd_status(args: argparse.Namespace) -> int:  # noqa: ARG001
     print(f"  records_count {body.get('records_count')}")
     print(f"  model_name    {body.get('model_name')}")
     print(f"  model_loaded  {body.get('model_loaded')}")
+    if show_all and strays:
+        _print_err(
+            f"warning: {strays} daemon instance(s) running outside the "
+            f"endpoint — serving nobody, holding memory. Inspect before killing."
+        )
+        return 1
     return 0
 
 
@@ -229,6 +332,11 @@ def register(subparsers) -> None:
     p_stop.set_defaults(func=_cmd_stop)
 
     p_status = sub.add_parser("status", help="report daemon health + metrics")
+    p_status.add_argument(
+        "--all", action="store_true",
+        help="also list every live daemon process and flag any that don't "
+             "own the endpoint (strays)",
+    )
     p_status.set_defaults(func=_cmd_status)
 
     p_restart = sub.add_parser(

@@ -1,6 +1,6 @@
 """v0.7-x-vec-index W-F: graph_ops unit tests with stub :class:`RecordsVecIndex`.
 
-Each function in ``Priming Stream.graph_ops`` is exercised against a real
+Each function in ``priming_stream.graph_ops`` is exercised against a real
 ``GraphRepo`` (migrated tmp SQLite) and a stub vec_index that returns
 canned :class:`VecHit` lists. No real fastembed / ChromaDB.
 
@@ -19,7 +19,6 @@ from priming_stream.graph_ops import (
     graph_chunk_around_anchor,
     graph_records,
     graph_search_records,
-    graph_spread_op,
     graph_stats,
 )
 from priming_stream.integrations.vec_index import VecHit
@@ -166,37 +165,9 @@ def test_graph_records_unknown_returns_none(tmp_path):
     assert graph_records("", repo) is None
 
 
-# -- graph_spread_op ------------------------------------------------------
-
-
-def test_spread_op_returns_ranked_dicts(tmp_path):
-    """graph_spread_op returns rank-ordered dicts with source_date and kind.
-
-    Adapted from the legacy spread() test: now uses walk_two_seeds via
-    the full A-pipeline stub (_StubVecIndex with embed_texts/query_by_vecs).
-    """
-    repo = _repo(tmp_path)
-    _make_record(repo, "rec_00000001", "alpha")
-    _make_record(repo, "rec_00000002", "beta")
-    vec = _StubVecIndex(hits=[
-        VecHit(record_id="rec_00000001", score=0.9, summary="alpha"),
-        VecHit(record_id="rec_00000002", score=0.6, summary="beta"),
-    ])
-    out = graph_spread_op("hello", vec, repo, _cfg_bridge())
-    assert [(d["rank"], d["record_id"]) for d in out] == [
-        (1, "rec_00000001"), (2, "rec_00000002"),
-    ]
-    assert out[0]["summary"] == "alpha"
-    # New: source_date and kind fields must be present (parity with search tools).
-    assert "source_date" in out[0]
-    assert "kind" in out[0]
-    assert out[0]["kind"] == "claim"  # default kind for _make_record
-
-
-def test_spread_op_empty_text_returns_empty(tmp_path):
-    repo = _repo(tmp_path)
-    vec = _StubVecIndex(hits=[])
-    assert graph_spread_op("", vec, repo, _cfg_bridge()) == []
+# graph_spread_op deleted: no production caller existed — the deliberate
+# pull surfaces are MCP graph_spread + `prime search`, both on
+# build_priming. Its tests went with it.
 
 
 # -- graph_stats ----------------------------------------------------------

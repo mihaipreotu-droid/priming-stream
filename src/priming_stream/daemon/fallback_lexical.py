@@ -7,7 +7,13 @@ hook never accidentally mutates the graph.
 The query string is sanitized for FTS5's ``MATCH`` syntax: tokens are
 extracted with a Unicode word regex and each is wrapped in double quotes
 so special characters (``"``, ``*``, ``:``, parentheses, NEAR) don't
-parse-error the underlying virtual table.
+parse-error the underlying virtual table. Tokens are joined with ``OR``
+(2026-07-21): the previous implicit-AND join required EVERY prompt token
+to appear in a ≤20-word summary, which made the fallback structurally
+dead on prompts over ~15 tokens — exactly the long-prompt/deadline-breach
+case it exists to catch. Under OR, ``bm25()`` ranking does the real work
+(rarer matched terms rank higher); a breach now degrades to lexical
+priming instead of silence.
 
 NEVER raises — returns ``[]`` on missing DB, empty query, or any error.
 """
@@ -20,19 +26,29 @@ from pathlib import Path
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
+# Cap on distinct query tokens (long brief-style prompts reach ~500). Keeps
+# the FTS5 OR-query cheap; first-N keeps the prompt head, which carries the
+# task statement in brief-shaped prompts.
+_MAX_TOKENS = 64
+
 
 def _sanitize_for_fts5(query_text: str) -> str:
-    """Tokenize + quote each token; join with implicit-AND whitespace.
+    """Tokenize + quote each token; dedupe (case-insensitive, order-kept),
+    cap at ``_MAX_TOKENS``, join with ``OR``.
 
     Single-char tokens are dropped (BM25 noise; the default FTS5 tokenizer
     already filters most). Returns empty string for empty input — callers
     skip the SQL entirely in that case.
     """
     tokens = _TOKEN_RE.findall(query_text or "")
-    tokens = [t for t in tokens if len(t) >= 2]
-    if not tokens:
+    seen: dict[str, str] = {}
+    for t in tokens:
+        if len(t) >= 2 and t.lower() not in seen:
+            seen[t.lower()] = t
+    kept = list(seen.values())[:_MAX_TOKENS]
+    if not kept:
         return ""
-    return " ".join(f'"{t}"' for t in tokens)
+    return " OR ".join(f'"{t}"' for t in kept)
 
 
 def search(db_path: Path, query_text: str, k: int = 10) -> list[tuple[str, str]]:

@@ -3,8 +3,9 @@
 Replaces the qmd CLI transport: bridge spreading walk and sleep-cycle
 writes both go through this module. Collection ``records`` is opened
 (or created) on a single ChromaDB :class:`PersistentClient`; embeddings
-are computed locally via :class:`fastembed.TextEmbedding` (multilingual
-MiniLM-L12-v2, 384-dim) so we never call out to a remote API.
+are computed locally via :class:`fastembed.TextEmbedding` (model from
+``config.vec_index.model_name``; bge-m3 int8, 1024-dim, since 2026-07-21)
+so we never call out to a remote API.
 
 Two conventions are load-bearing:
 
@@ -52,6 +53,77 @@ _COLLECTION_NAME = "records"
 # See module docstring for rationale.
 _MODEL_CACHE: dict[str, Any] = {}
 _MODEL_CACHE_LOCK = threading.Lock()
+
+# Custom fastembed models not in the stock list. Registered lazily (right
+# before a TextEmbedding is built, under _MODEL_CACHE_LOCK) so merely
+# importing this module stays cheap — the read-only MCP server never reaches
+# _get_model().
+#
+# BGE-M3 is stored in ONNX external-data format: model.onnx (~0.7MB graph
+# skeleton) + model.onnx_data (~2.2GB weights). ``additional_files`` is
+# LOAD-BEARING: omit it and fastembed fetches only the skeleton, yielding a
+# weightless model that loads WITHOUT error and emits garbage embeddings
+# (silent corruption). See docs/embedding-options.md.
+_REGISTERED_MODELS: set[str] = set()
+
+# Custom model specs, registered ON DEMAND for the model actually configured
+# (2026-07-21 review; — both used to register unconditionally; the
+# unused one is now registered only if a rollback instance asks for it).
+#
+# fp32 note: BGE-M3 is stored in ONNX external-data format; ``additional_files``
+# is LOAD-BEARING there (omit it → weightless skeleton → garbage embeddings,
+# see docs/embedding-options.md). The int8 file is
+# self-contained (~568MB) — the weightless trap applies only to fp32.
+#
+# int8 note (adopted 2026-07-21 after a quality + latency probe): HF
+# revision 25b9af8e sits pinned in the local hub cache; fastembed cannot pin
+# revisions, so a cache wipe re-fetches main. The daemon's warmup canary
+# (daemon/server.py:_run_canary) gates every load against a wrong artifact.
+_CUSTOM_MODEL_SPECS: dict[str, dict] = {
+    "BAAI/bge-m3": dict(
+        source="BAAI/bge-m3",
+        model_file="onnx/model.onnx",
+        additional_files=["onnx/model.onnx_data"],
+    ),
+    "onnx-community/bge-m3-ONNX-int8": dict(
+        source="onnx-community/bge-m3-ONNX",
+        model_file="onnx/model_int8.onnx",
+        additional_files=None,
+    ),
+}
+
+
+def _ensure_custom_models_registered(model_name: str | None = None) -> None:
+    """Register the custom fastembed model(s) needed (idempotent).
+
+    ``model_name`` given → register only that one (if it is a custom spec);
+    ``None`` → register all specs (back-compat for callers that don't know
+    the target yet). Must run before ``TextEmbedding(model_name=...)`` for a
+    custom model — they are absent from fastembed's stock list. Callers hold
+    ``_MODEL_CACHE_LOCK`` so this need not lock itself.
+    """
+    from fastembed import TextEmbedding
+    from fastembed.common.model_description import ModelSource, PoolingType
+
+    wanted = [model_name] if model_name else list(_CUSTOM_MODEL_SPECS)
+    todo = [m for m in wanted
+            if m in _CUSTOM_MODEL_SPECS and m not in _REGISTERED_MODELS]
+    if not todo:
+        return
+    stock = {m["model"] for m in TextEmbedding.list_supported_models()}
+    for name in todo:
+        spec = _CUSTOM_MODEL_SPECS[name]
+        if name not in stock:
+            TextEmbedding.add_custom_model(
+                model=name,
+                pooling=PoolingType.CLS,
+                normalization=True,
+                sources=ModelSource(hf=spec["source"]),
+                dim=1024,
+                model_file=spec["model_file"],
+                additional_files=spec["additional_files"],
+            )
+        _REGISTERED_MODELS.add(name)
 
 
 @dataclass
@@ -221,6 +293,7 @@ class RecordsVecIndex:
             from fastembed import TextEmbedding
 
             with _MODEL_CACHE_LOCK:
+                _ensure_custom_models_registered(self._model_name)
                 cached = _MODEL_CACHE.get(self._model_name)
                 if cached is None:
                     cached = TextEmbedding(model_name=self._model_name)

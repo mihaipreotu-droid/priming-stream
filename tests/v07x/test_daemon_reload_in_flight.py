@@ -44,6 +44,12 @@ class _StubVecIndex:
     def search(self, query: str, k: int):
         return []
 
+    def embed_texts(self, texts):
+        # canary-friendly stub: related pair collinear, control orthogonal
+        # (the reload path now runs the embedder-identity canary).
+        vecs = [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        return vecs[: len(texts)]
+
 
 def _install_stub_state(monkeypatch, *, initial_count: int, reload_count: int):
     _StubVecIndex.instances.clear()
@@ -126,6 +132,39 @@ def _priming_with_count(vec_index) -> PrimingResult:
     )
 
 
+def test_reload_refreshes_bridge_cfg_and_model_name(live_server):
+    """/v1/reload must pick up the CURRENT config —
+    [bridge] knob edits apply on the nightly reload, not only on restart;
+    /v1/health's model_name follows the live config too."""
+    old_cfg = server._bridge_cfg
+    status, _ = _post(live_server, "/v1/reload", {})
+    assert status == 200
+    assert server._bridge_cfg is not old_cfg
+    assert server._model_name != "stub-model"
+
+
+def test_spread_refuses_when_canary_failed(live_server, monkeypatch):
+    """Canary gate: an unverified embedder must refuse spread
+    (503 → hook client None → lexical fallback), never serve garbage."""
+    monkeypatch.setattr(server, "_canary_ok", False)
+    status, body = _post(live_server, "/v1/spread", {"prompt_text": "x"})
+    assert status == 503
+    assert "canary" in body["error"]
+
+
+def test_run_canary_separation():
+    class _Good:
+        def embed_texts(self, texts):
+            return [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]][: len(texts)]
+
+    class _Flat:  # weightless/wrong artifact: no separation
+        def embed_texts(self, texts):
+            return [[1.0, 0.0]] * len(texts)
+
+    assert server._run_canary(_Good()) is True
+    assert server._run_canary(_Flat()) is False
+
+
 def test_r2b_new_spread_after_reload_sees_new_index(live_server, monkeypatch):
     """build_priming is mocked to introspect the live ``_vec_index`` reference
     (passed as the ``vec_index`` kwarg) and report its count as a single fake
@@ -133,7 +172,8 @@ def test_r2b_new_spread_after_reload_sees_new_index(live_server, monkeypatch):
     atomic swap should make build_priming see count=11 (the new stub).
     """
     def _fake_build_priming(prompt, prev, *, vec_index, repo, conn, cfg,
-                            now=None, exclude_recent_ids=frozenset()):
+                            now=None, exclude_recent_ids=frozenset(),
+                            turn_features=None):
         return _priming_with_count(vec_index)
     monkeypatch.setattr(server, "build_priming", _fake_build_priming)
 

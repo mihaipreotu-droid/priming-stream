@@ -5,13 +5,17 @@ any failure. On missing or stale endpoint files the client triggers a
 background autostart (see :func:`priming_stream.daemon.lifecycle.autostart_daemon`)
 and returns ``None`` immediately; the next hook fire finds a warm daemon.
 
-Deadlines (binding per brief §2):
+Deadlines (binding; owner decision 2026-07-21, was 800ms pre-int8):
 
 * connect: 100ms (TCP handshake budget)
-* total:   800ms (hard cap on the whole request)
+* total:   2000ms (hard cap on the whole request)
 
-The hook must not wait longer than that for the daemon under any
-circumstance — otherwise it would block the Claude Code turn.
+The deadline is a ceiling on the tail, not a per-turn tax: the typical
+turn cost is governed by the seed char budget (hook side), not by this
+cap. 2000ms covers the p90 prompt length (~3.2k chars ≈ 912ms embed
+under int8) + walk + overhead; what exceeds it falls to the lexical
+fallback. The hook must not wait longer than this for the daemon under
+any circumstance — otherwise it would block the Claude Code turn.
 """
 from __future__ import annotations
 
@@ -29,7 +33,10 @@ def spread(
     *,
     session_id: str | None = None,
     recent_ids: list | None = None,
-    deadline_ms: int = 800,
+    turn_idx: int | None = None,
+    tool_density: float | None = None,
+    notification: bool | None = None,
+    deadline_ms: int = 2000,
     connect_timeout_ms: int = 100,
 ) -> dict | None:
     """Call ``POST /v1/spread`` on the resident daemon.
@@ -42,6 +49,11 @@ def spread(
     ``recent_ids`` (item 3.3): record ids primed in the last N turns of this
     session; the daemon drops them before truncating each bucket so freed
     slots backfill from the tail. ``None``/empty → no cross-turn dedup.
+
+    ``turn_idx`` / ``tool_density`` (P2/P3 turn-gate): regime features the
+    hook computes per turn; the daemon gates on them (floor / whisper /
+    kickoff exemption). ``None`` values are omitted from the request body —
+    a request without features is never gated.
     """
     try:
         info = lifecycle.read_endpoint()
@@ -59,17 +71,25 @@ def spread(
         if port <= 0:
             return None
 
-        body = json.dumps({
+        payload = {
             "prompt_text": prompt_text,
             "prev_assistant_text": prev_assistant_text,
             "session_id": session_id,
             "recent_ids": list(recent_ids) if recent_ids else [],
-        }, ensure_ascii=False).encode("utf-8")
+        }
+        if turn_idx is not None:
+            payload["turn_idx"] = int(turn_idx)
+        if tool_density is not None:
+            payload["tool_density"] = float(tool_density)
+        if notification is not None:
+            payload["notification"] = bool(notification)
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
         # Roll a single hard deadline across every socket operation, not
         # a per-op budget. Per-op timeouts would let a drip-feed server
         # spend ``remaining_s`` separately on write, getresponse, and
-        # read — up to ~3x the budget. Spec §5.9 caps total at 800ms.
+        # read — up to ~3x the budget. Total capped at ``deadline_ms``
+        # (spec §5.9 shape; 2000ms since the int8 adoption).
         t_deadline = time.monotonic() + (deadline_ms / 1000.0)
 
         def _remaining() -> float:

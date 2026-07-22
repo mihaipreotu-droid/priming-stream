@@ -33,9 +33,9 @@ _WORKTREE_SRC = Path(__file__).resolve().parents[2] / "src"
 
 
 def _worktree_env(extra: dict | None = None) -> dict:
-    """Build a child-process env that imports ``Priming Stream`` from this worktree.
+    """Build a child-process env that imports ``priming_stream`` from this worktree.
 
-    Without this, a globally installed ``Priming Stream`` (the parent repo's
+    Without this, a globally installed ``priming_stream`` (the parent repo's
     editable install) would shadow the worktree's modified package.
     """
     env = os.environ.copy()
@@ -89,7 +89,7 @@ def test_daemon_help_runs_clean():
     """``python -m priming_stream.cli.main daemon --help`` exits 0.
 
     The worktree's ``src/`` may not be the active import location (an
-    installed copy of ``Priming Stream`` could shadow it). We force it via
+    installed copy of ``priming_stream`` could shadow it). We force it via
     ``PYTHONPATH`` so the test always exercises this worktree's CLI.
     """
     env = _worktree_env()
@@ -257,7 +257,10 @@ def test_start_background_autostart_appears(capsys, monkeypatch):
     """``autostart_daemon`` is stubbed to publish an endpoint file
     immediately; ``start --background`` returns 0 once it sees the file."""
 
-    def _fake_autostart():
+    def _fake_autostart(*, force=False):
+        assert force is True, (
+            "an explicit `daemon start` must bypass the autostart cooldown"
+        )
         lifecycle.write_endpoint(
             host="127.0.0.1", port=23456, pid=os.getpid(),
             started_at="2026-05-27T00:00:00Z",
@@ -276,12 +279,66 @@ def test_start_background_autostart_appears(capsys, monkeypatch):
 
 def test_start_background_autostart_timeout(capsys, monkeypatch):
     """When autostart never publishes an endpoint, return 1 with timeout msg."""
-    monkeypatch.setattr(lifecycle, "autostart_daemon", lambda: None)
+    monkeypatch.setattr(lifecycle, "autostart_daemon", lambda *, force=False: None)
     monkeypatch.setattr(cli_daemon, "_AUTOSTART_TIMEOUT_S", 1.0)
     rc = cli_daemon._cmd_start(argparse_namespace(background=True))
     assert rc == 1
     err = capsys.readouterr().err
     assert "timed out" in err
+
+
+# ---- status --all: stray detection (2026-07-16) --------------------------
+
+
+def _fake_instances(*pids):
+    return [
+        {"pid": p, "started": "2026-07-16 11:22:56", "ports": [62917],
+         "rss_mb": 1500}
+        for p in pids
+    ]
+
+
+def test_status_all_flags_a_stray_instance(mock_health_server, capsys, monkeypatch):
+    """A daemon that runs, listens and holds memory while owning no endpoint
+    is invisible to every client (they only read daemon.json). `--all` must
+    surface it and fail, even though the endpoint daemon itself is healthy."""
+    monkeypatch.setattr(
+        cli_daemon, "_daemon_instances",
+        lambda: _fake_instances(os.getpid(), 10328),
+    )
+    rc = cli_daemon._cmd_status(argparse_namespace(all=True))
+
+    cap = capsys.readouterr()
+    assert "pid=10328" in cap.out
+    assert "STRAY" in cap.out
+    assert "endpoint owner" in cap.out
+    assert rc == 1, "a stray alongside a healthy endpoint must not report OK"
+    assert "1 daemon instance(s) running outside the endpoint" in cap.err
+
+
+def test_status_all_is_quiet_when_only_the_endpoint_daemon_runs(
+    mock_health_server, capsys, monkeypatch,
+):
+    monkeypatch.setattr(
+        cli_daemon, "_daemon_instances", lambda: _fake_instances(os.getpid()),
+    )
+    rc = cli_daemon._cmd_status(argparse_namespace(all=True))
+
+    assert rc == 0
+    assert "STRAY" not in capsys.readouterr().out
+
+
+def test_status_without_all_does_not_enumerate_processes(
+    mock_health_server, capsys, monkeypatch,
+):
+    """Plain `status` stays light — no psutil scan, no behaviour change."""
+    def _boom():
+        raise AssertionError("plain status must not enumerate processes")
+
+    monkeypatch.setattr(cli_daemon, "_daemon_instances", _boom)
+    rc = cli_daemon._cmd_status(argparse_namespace())
+    assert rc == 0
+    assert "instances:" not in capsys.readouterr().out
 
 
 # ---- argparse_namespace helper ------------------------------------------

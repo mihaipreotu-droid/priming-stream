@@ -145,10 +145,17 @@ def test_prune_drops_lines_older_than_retention(tmp_path, usage_on):
     episodic.mkdir()
     path = episodic / "usage.jsonl"
     # First (oldest) line predates the 30-day window → prune triggers.
-    old = {"at": "2020-01-01T00:00:00Z", "tool": "graph_records",
-           "record_id": "rec_old", "session_id": ""}
-    recent = {"at": "2026-06-16T11:00:00Z", "tool": "graph_records",
-              "record_id": "rec_recent", "session_id": ""}
+    # Dates are RELATIVE to now — a hardcoded "recent" date aged out of the
+    # window on 2026-07-16 and turned this test into a permanent red that
+    # masked real failures (2026-07-21 review;.
+    from datetime import datetime, timedelta, timezone
+    _fmt = "%Y-%m-%dT%H:%M:%SZ"
+    now = datetime.now(timezone.utc)
+    old = {"at": (now - timedelta(days=45)).strftime(_fmt),
+           "tool": "graph_records", "record_id": "rec_old", "session_id": ""}
+    recent = {"at": (now - timedelta(days=1)).strftime(_fmt),
+              "tool": "graph_records", "record_id": "rec_recent",
+              "session_id": ""}
     path.write_text(
         json.dumps(old) + "\n" + json.dumps(recent) + "\n", encoding="utf-8",
     )

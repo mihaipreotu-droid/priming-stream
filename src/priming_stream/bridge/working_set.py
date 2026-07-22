@@ -79,6 +79,7 @@ def build_priming(
     cfg,
     now: datetime | None = None,
     exclude_recent_ids: frozenset[str] | set[str] = frozenset(),
+    turn_features: dict | None = None,
 ) -> PrimingResult:
     """Run the A-pipeline and return the two priming buckets.
 
@@ -95,6 +96,22 @@ def build_priming(
     the same session. Applied to BOTH buckets before their truncation so freed
     slots backfill from the tail. Empty default → behaviour identical to before
     (stateless MCP pull-bridges pass nothing).
+
+    ``turn_features`` (P2/P3 turn-gate, 2026-07-21 final amendment: ONE
+    mechanism, TWO outputs — FULL or WHISPER, never silence) —
+    ``{"turn_idx": int|None, "tool_density": float|None,
+    "notification": bool|None}``, sent ONLY by the hook push path. When
+    present and ``cfg.turn_floor > 0``: kickoff turns pass full
+    (unconditional); otherwise the turn whispers — top ``cfg.whisper_k``
+    semantic + top ``cfg.whisper_lex_k`` lexical — on any of three
+    triggers: notification turn (execution regime at its extreme), turn top
+    rank-score under ``cfg.turn_floor`` (weak associative field; the hook
+    renders the marker), or tool-dense turn (``tool_density >=
+    cfg.regime_density``). ``None`` (MCP / CLI deliberate pulls) → no
+    gating, unchanged behaviour. Calibrated empirically (2026-07-21):
+    known-valuable records cluster at semantic rank 4-5 → k=5; a thin
+    lexical channel stays because exact-identifier matches surface
+    through it on dense turns → lex_k=3, not 0.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -105,13 +122,41 @@ def build_priming(
         now=now,
         exclude_recent_ids=exclude_recent_ids,
     )
+
+    gated = "full"
+    floor = float(getattr(cfg, "turn_floor", 0.0) or 0.0)
+    if turn_features is not None and floor > 0:
+        ti = turn_features.get("turn_idx")
+        # turn_idx=None (echoes unreadable / no session id) counts as kickoff:
+        # the gate's unknowns fail OPEN toward full priming — a genuine turn
+        # 1-3 whose echo history failed to read must not lose its
+        # unconditional-full exemption (2026-07-21 review;.
+        kickoff = ti is None or ti <= int(getattr(cfg, "kickoff_turns", 3))
+        if not kickoff:
+            dens = turn_features.get("tool_density")
+            if turn_features.get("notification"):
+                gated = "whisper-notification"
+            elif not semantic or semantic[0].score < floor:
+                # An EMPTY semantic bucket is the weakest field there is —
+                # it whispers with the marker, it does not pass as "full"
+                # (2026-07-21 review; dedup can drain the bucket mid-session
+                # and used to skip the floor check entirely).
+                gated = "whisper-floor"
+            elif dens is not None and dens >= float(getattr(cfg, "regime_density", 0.6)):
+                gated = "whisper-regime"
+
+    lex_limit = cfg.bucket_lexical
+    if gated != "full":
+        semantic = semantic[: int(getattr(cfg, "whisper_k", 5))]
+        lex_limit = int(getattr(cfg, "whisper_lex_k", 3))
+
     exclude = {sr.record.id for sr in semantic}
     lexical = lexical_bucket(
         conn,
         prompt,
-        limit=cfg.bucket_lexical,
+        limit=lex_limit,
         exclude_ids=exclude,
         kind_bias=True,
         exclude_recent_ids=exclude_recent_ids,
-    )
-    return PrimingResult(semantic=semantic, lexical=lexical)
+    ) if lex_limit > 0 else []
+    return PrimingResult(semantic=semantic, lexical=lexical, gated=gated)

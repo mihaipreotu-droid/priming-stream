@@ -237,8 +237,9 @@ def test_c2_spread_returns_two_buckets_with_required_shape(
     )
     assert status == 200
     assert set(body.keys()) == {
-        "semantic", "lexical", "spread_ms", "daemon_version",
+        "semantic", "lexical", "spread_ms", "gated", "daemon_version",
     }
+    assert body["gated"] == "full"
     assert body["daemon_version"] == server.DAEMON_VERSION
     assert isinstance(body["spread_ms"], (int, float))
     assert len(body["semantic"]) == 2

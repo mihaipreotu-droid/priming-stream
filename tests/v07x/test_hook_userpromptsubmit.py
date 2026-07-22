@@ -48,7 +48,8 @@ def test_d7_warm_daemon_returns_rendered_buckets(monkeypatch, capsys):
     sections via ``render_buckets`` + emits them (Component A shape)."""
 
     def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
-                    deadline_ms=800, connect_timeout_ms=100):
+                    turn_idx=None, tool_density=None, notification=None,
+                    deadline_ms=2000, connect_timeout_ms=100):
         return {
             "semantic": [
                 {"record_id": "rec_001", "summary": "alpha summary",
@@ -92,7 +93,8 @@ def test_d7_warm_daemon_semantic_only_omits_lexical_section(monkeypatch, capsys)
     """A semantic-only response still renders (lexical section omitted)."""
 
     def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
-                    deadline_ms=800, connect_timeout_ms=100):
+                    turn_idx=None, tool_density=None, notification=None,
+                    deadline_ms=2000, connect_timeout_ms=100):
         return {
             "semantic": [
                 {"record_id": "rec_001", "summary": "alpha summary",
@@ -119,7 +121,8 @@ def test_d7_warm_daemon_lexical_only_still_renders(monkeypatch, capsys):
     the citation channel can be the only relevant signal (Collins case)."""
 
     def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
-                    deadline_ms=800, connect_timeout_ms=100):
+                    turn_idx=None, tool_density=None, notification=None,
+                    deadline_ms=2000, connect_timeout_ms=100):
         return {
             "semantic": [],
             "lexical": [
@@ -139,6 +142,38 @@ def test_d7_warm_daemon_lexical_only_still_renders(monkeypatch, capsys):
     text = payload["hookSpecificOutput"]["additionalContext"]
     assert "Lexical (term / citation match)" in text
     assert "[rec_card · doc]" in text
+
+
+def test_daemon_empty_whisper_floor_caps_and_marks_fallback(
+    monkeypatch, capsys,
+):
+    """2026-07-21 review: daemon answers 200 with EMPTY buckets on a
+    whisper-floor turn → the Tier-2 fallback keeps the whisper cap
+    (whisper_lex_k, not 10) and the weak-field marker — the gate is not
+    silently defeated by an empty bucket."""
+
+    def fake_spread(prompt, prev="", *, session_id=None, recent_ids=None,
+                    turn_idx=None, tool_density=None, notification=None,
+                    deadline_ms=2000, connect_timeout_ms=100):
+        return {"semantic": [], "lexical": [], "spread_ms": 4.0,
+                "gated": "whisper-floor",
+                "daemon_version": "v0.7-x-bridge-daemon"}
+
+    monkeypatch.setattr(daemon_client, "spread", fake_spread)
+
+    def fake_search(db_path, query_text, k=10):
+        return [(f"rec_f{i:04d}", f"hit {i}") for i in range(10)]
+
+    monkeypatch.setattr(fallback_lexical, "search", fake_search)
+
+    out = _drive_hook(monkeypatch, capsys,
+                      {"prompt": "slab", "session_id": "s1"})
+    payload = json.loads(out)
+    text = payload["hookSpecificOutput"]["additionalContext"]
+    # marker present, and only whisper_lex_k (3) of the 10 hits rendered
+    assert "weak suggestions" in text
+    assert "[rec_f0002]" in text
+    assert "[rec_f0003]" not in text
 
 
 # --------------------------------------------------------- D6 — lexical path

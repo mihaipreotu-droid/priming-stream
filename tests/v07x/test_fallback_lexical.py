@@ -109,14 +109,49 @@ def test_d4_corrupt_db_returns_empty(tmp_path):
 # ---------------------------------------------------------------- D5 tests
 
 
-def test_d5_sanitizer_quotes_tokens():
+def test_d5_sanitizer_quotes_tokens_or_join():
+    # OR join (2026-07-21): implicit AND made the fallback structurally dead
+    # on prompts over ~15 tokens — the exact deadline-breach case it covers.
     out = _sanitize_for_fts5("foo bar baz")
-    assert out == '"foo" "bar" "baz"'
+    assert out == '"foo" OR "bar" OR "baz"'
 
 
 def test_d5_sanitizer_drops_single_chars():
     out = _sanitize_for_fts5("a b c hello world")
-    assert out == '"hello" "world"'
+    assert out == '"hello" OR "world"'
+
+
+def test_d5_sanitizer_dedupes_case_insensitive():
+    out = _sanitize_for_fts5("Bridge bridge BRIDGE alpha")
+    assert out == '"Bridge" OR "alpha"'
+
+
+def test_d5_sanitizer_caps_tokens():
+    from priming_stream.daemon.fallback_lexical import _MAX_TOKENS
+    query = " ".join(f"tok{i:03d}" for i in range(_MAX_TOKENS + 50))
+    out = _sanitize_for_fts5(query)
+    assert out.count(" OR ") == _MAX_TOKENS - 1
+    assert f"tok{_MAX_TOKENS - 1:03d}" in out
+    assert f"tok{_MAX_TOKENS:03d}" not in out
+
+
+def test_d5_long_prompt_still_matches(tmp_path):
+    """The regression the OR join fixes: a long prompt where only a few
+    tokens appear in any summary must still surface those summaries
+    (implicit AND returned 0 rows here)."""
+    db = _make_db(tmp_path, [
+        "bridge spreading activation in the Priming Stream",
+        "totally unrelated content about pottery",
+    ])
+    long_prompt = (
+        "let us carefully review the plan for today because we need "
+        "to check the bridge spreading behaviour on the stream while "
+        "many other unrelated words dilute every single token match "
+        "beyond anything an implicit conjunction could survive"
+    )
+    hits = search(db, long_prompt, k=10)
+    assert len(hits) >= 1
+    assert "bridge" in hits[0][1]
 
 
 def test_d5_sanitizer_empty_input():

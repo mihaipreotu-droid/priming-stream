@@ -20,12 +20,34 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 DAEMON_DIR_ENV = "PRIMING_STREAM_DAEMON_DIR"
 DISABLE_AUTOSTART_ENV = "PRIMING_STREAM_DISABLE_AUTOSTART"
 
 _REQUIRED_ENDPOINT_FIELDS = ("host", "port", "pid", "started_at", "version")
+
+AUTOSTART_COOLDOWN_S = 90.0
+"""Minimum gap between two hook-triggered autostarts (2026-07-16 incident).
+
+``is_endpoint_stale`` can report a *live* daemon dead — observed 4× in 18
+minutes right after a resume from sleep, while the daemon that owned the
+endpoint was alive and served again at 11:44. Each false verdict fired its
+own ``autostart_daemon``, so four daemons were spawned to replace a daemon
+that had never died.
+
+The cooldown bounds the damage without needing to know which branch of
+``is_endpoint_stale`` misfired (``read_endpoint`` returning None vs.
+``OpenProcess`` failing) — neither is reproducible outside a real
+suspend/resume. 90s sits above the measured cold start (~12s: lock at
+15:20:05 → listening at 15:20:17), so a genuinely dead daemon is replaced
+by the first hook fire after the window; until then the hook degrades to
+its lexical fallback, which is the designed cold path.
+
+Explicit starts (``prime daemon start --background``) pass ``force=True``:
+a human asking for a daemon is not the failure mode this guards.
+"""
 
 
 def daemon_dir() -> Path:
@@ -58,6 +80,40 @@ def lockfile_path() -> Path:
 
 def log_path() -> Path:
     return daemon_dir() / "daemon.log"
+
+
+def autostart_stamp_path() -> Path:
+    return daemon_dir() / "autostart.stamp"
+
+
+def autostart_recently(cooldown_s: float = AUTOSTART_COOLDOWN_S) -> bool:
+    """True if an autostart was fired less than ``cooldown_s`` ago.
+
+    Never raises — a missing/unreadable stamp means "no recent spawn", so a
+    broken stamp can only ever cost an extra daemon, never block every
+    autostart forever.
+
+    A *negative* age (stamp in the future) also reads as "not recent" — this
+    is the suspend/resume case that started the whole incident: the clock
+    jumped ~6.8h at wake (01:33:32Z → 08:21:57Z), and a stamp written before
+    a backwards correction must not freeze autostart until the clock catches
+    up.
+    """
+    try:
+        age = time.time() - autostart_stamp_path().stat().st_mtime
+    except Exception:
+        return False
+    return 0.0 <= age < cooldown_s
+
+
+def _touch_autostart_stamp() -> None:
+    """Record an autostart attempt. Best-effort — never raises."""
+    try:
+        autostart_stamp_path().write_text(
+            str(time.time()), encoding="utf-8",
+        )
+    except Exception:
+        pass
 
 
 def read_endpoint() -> dict | None:
@@ -241,7 +297,7 @@ def is_endpoint_stale(info: dict | None) -> bool:
         return True
 
 
-def autostart_daemon() -> None:
+def autostart_daemon(*, force: bool = False) -> None:
     """Spawn a detached daemon subprocess and return immediately.
 
     Command: ``[sys.executable, "-m", "priming_stream.daemon.server"]``.
@@ -250,6 +306,10 @@ def autostart_daemon() -> None:
     fds redirected to ``DEVNULL``. POSIX: ``start_new_session=True``,
     same DEVNULL redirection. Caller does not wait on the subprocess.
 
+    Rate-limited by :data:`AUTOSTART_COOLDOWN_S` (see its docstring for the
+    2026-07-16 incident): a spawn within the cooldown is skipped. Pass
+    ``force=True`` for an explicit, human-initiated start — the CLI does.
+
     Tests set ``PRIMING_STREAM_DISABLE_AUTOSTART=1`` to skip the spawn
     entirely — without that guard, hook-as-subprocess tests would leak
     a real detached daemon (which then loads fastembed + holds the
@@ -257,6 +317,9 @@ def autostart_daemon() -> None:
     """
     if os.environ.get(DISABLE_AUTOSTART_ENV) == "1":
         return
+    if not force and autostart_recently():
+        return
+    _touch_autostart_stamp()
     cmd = [sys.executable, "-m", "priming_stream.daemon.server"]
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,

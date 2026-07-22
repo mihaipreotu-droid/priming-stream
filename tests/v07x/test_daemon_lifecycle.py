@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -257,6 +258,67 @@ def test_autostart_disabled_by_env_skips_popen(monkeypatch):
     lifecycle.autostart_daemon()
 
     assert calls["n"] == 0
+
+
+# --------------------------------------------- autostart cooldown (2026-07-16)
+
+
+@pytest.fixture
+def _count_spawns(monkeypatch):
+    """Count autostart spawns without launching anything."""
+    calls = {"n": 0}
+
+    class FakePopen:
+        def __init__(self, *a, **kw):
+            calls["n"] += 1
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(lifecycle.subprocess, "Popen", FakePopen)
+    monkeypatch.delenv(lifecycle.DISABLE_AUTOSTART_ENV, raising=False)
+    return calls
+
+
+def test_autostart_cooldown_collapses_a_burst_to_one_spawn(_count_spawns):
+    """The incident: 4 hook fires in 18 minutes, each convinced the (live)
+    daemon was dead, each spawning its own. Back-to-back autostarts must
+    collapse to a single spawn."""
+    for _ in range(4):
+        lifecycle.autostart_daemon()
+    assert _count_spawns["n"] == 1
+
+
+def test_autostart_force_bypasses_cooldown(_count_spawns):
+    """`prime daemon start` is a human asking; the cooldown guards against
+    a misfiring staleness check, not against the user."""
+    lifecycle.autostart_daemon()
+    lifecycle.autostart_daemon(force=True)
+    assert _count_spawns["n"] == 2
+
+
+def test_autostart_spawns_again_once_cooldown_expires(_count_spawns):
+    lifecycle.autostart_daemon()
+    # Age the stamp past the window rather than sleeping through it.
+    stamp = lifecycle.autostart_stamp_path()
+    old = time.time() - (lifecycle.AUTOSTART_COOLDOWN_S + 1)
+    os.utime(stamp, (old, old))
+    lifecycle.autostart_daemon()
+    assert _count_spawns["n"] == 2
+
+
+def test_autostart_not_blocked_by_stamp_in_the_future(_count_spawns):
+    """The clock jumped ~6.8h forward on resume (01:33:32Z → 08:21:57Z) in
+    the very incident this guards. A stamp that ends up in the future must
+    not freeze autostart until real time catches up — fail open."""
+    lifecycle.autostart_daemon()
+    stamp = lifecycle.autostart_stamp_path()
+    future = time.time() + 6 * 3600
+    os.utime(stamp, (future, future))
+    lifecycle.autostart_daemon()
+    assert _count_spawns["n"] == 2
+
+
+def test_autostart_recently_is_false_without_a_stamp():
+    assert lifecycle.autostart_recently() is False
 
 
 # ------------------------------------------------------------- misc/dir
